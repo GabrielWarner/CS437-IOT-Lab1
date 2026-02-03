@@ -31,7 +31,7 @@ def main():
                 time.sleep(0.3)
 
                 # Choose another direction
-                angle = random.choice([-30, 30])
+                angle = random.choice([-35, 35])
                 print(f'Turning to {angle} degrees')
 
                 # Back up
