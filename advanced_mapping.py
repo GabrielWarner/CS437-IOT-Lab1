@@ -10,6 +10,37 @@ OBSTACLE_THRESHOLD = 50   # Distance threshold to mark cells as obstacles (cm)
 ANGLE_START = -60
 ANGLE_END = 60
 ANGLE_STEP = 5
+CM_PER_SEC = 10.0        # rough estimate; calibrate once
+DRIVE_SPEED = 30         # the speed you use with px.forward()
+TURN_DEG_PER_SEC = 90.0
+
+def clamp_pose():
+    global car_x, car_y
+    car_x = max(0, min(MAP_SIZE - 1, car_x))
+    car_y = max(0, min(MAP_SIZE - 1, car_y))
+
+def update_position_forward(distance_cm):
+    """Update (car_x, car_y) assuming we moved forward distance_cm."""
+    global car_x, car_y
+    distance_cells = distance_cm / CM_PER_CELL
+    car_x = int(round(car_x + distance_cells * math.cos(car_theta)))
+    car_y = int(round(car_y + distance_cells * math.sin(car_theta)))
+    clamp_pose()
+
+def drive_forward_for(seconds, speed=DRIVE_SPEED):
+    px.forward(speed)
+    time.sleep(seconds)
+    px.stop()
+    update_position_forward(CM_PER_SEC * seconds)
+
+def turn_left_for(seconds):
+    global car_theta
+    px.set_dir_servo_angle(-30)
+    px.forward(DRIVE_SPEED)
+    time.sleep(seconds)
+    px.stop()
+    px.set_dir_servo_angle(0)
+    car_theta = (car_theta + math.pi*2) % (math.pi*2)
 
 px = Picarx()
 grid_map = np.zeros((MAP_SIZE, MAP_SIZE))
@@ -28,7 +59,14 @@ def main():
     """
     try:
         while True:
-            scan_environment()
+            blocked = scan_environment()
+            if blocked:
+                px.stop()
+                turn_left_for(0.5)   # turn a bit to avoid obstacle
+            else:
+                drive_forward_for(0.5)
+
+            time.sleep(0.2)
 
     except KeyboardInterrupt:
         print('Stopped by user')
@@ -99,6 +137,10 @@ def scan_environment():
     """
     previous_point = None
 
+    blocked_ahead = False
+    FRONT_ANGLE_WINDOW = 10      # degrees around 0
+    FRONT_STOP_CM = 25           # stop/turn if something within 25 cm ahead
+
     for servo_angle in range(ANGLE_START, ANGLE_END + 1, ANGLE_STEP):
         px.set_cam_pan_angle(servo_angle)
         time.sleep(0.15)
@@ -111,6 +153,11 @@ def scan_environment():
         if distance is None:
             previous_point = None
             continue
+
+        # Detect obstacle roughly in front of the car
+        if abs(servo_angle) <= FRONT_ANGLE_WINDOW and distance <= FRONT_STOP_CM:
+            blocked_ahead = True
+
 
         if distance <= OBSTACLE_THRESHOLD:
             distance_cells = distance / CM_PER_CELL
@@ -139,7 +186,7 @@ def scan_environment():
             previous_point = None
     # Reset pan servo to center after scan
     px.set_cam_pan_angle(0)
-
+    return blocked_ahead
 
 if __name__ == "__main__":
     main()
