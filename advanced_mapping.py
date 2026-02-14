@@ -14,8 +14,8 @@ ANGLE_STEP = 5
 px = Picarx()
 grid_map = np.zeros((MAP_SIZE, MAP_SIZE))
 
-# Car position (cm, radians)
-# car_x = 0.0
+# Car position (cm, radians) A.K.A "pose"
+# car_x = 50.0
 # car_y = 0.0
 car_x = MAP_SIZE // 2
 car_y = 0
@@ -27,13 +27,8 @@ def main():
     and updating the internal map and estimated position.
     """
     try:
-        # px.forward(30)
-
-        # 5 iterations of scanning and updating the map
-        for i in range(5):
+        while True:
             scan_environment()
-            print(f'Map after scan {i+1}:\n{grid_map}')
-            time.sleep(1) 
 
     except KeyboardInterrupt:
         print('Stopped by user')
