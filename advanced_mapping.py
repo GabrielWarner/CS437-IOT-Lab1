@@ -2,6 +2,7 @@ import numpy as np
 import math
 import time
 from picarx import Picarx
+import matplotlib.pyplot as plt
 
 # Constants
 MAP_SIZE = 100            # 100 x 100 grid
@@ -49,7 +50,7 @@ def main():
                 reverse(0.5)
                 turn_left(0.4)  # obstacle more on the right
             else:
-                drive_forward(0.5)  # path is clear
+                drive_forward(0.60)  # path is clear
 
             time.sleep(0.2)
 
@@ -169,7 +170,7 @@ def scan_environment():
             distance_cells = distance / CM_PER_CELL
 
             # Convert polar to Cartesian coordinates
-            angle_radians = math.radians(servo_angle) + car_theta
+            angle_radians = math.radians(-servo_angle) + car_theta
             x = int(round(car_x + distance_cells * math.cos(angle_radians)))
             y = int(round(car_y + distance_cells * math.sin(angle_radians)))
 
@@ -180,15 +181,14 @@ def scan_environment():
                 # Interpolate with previous detection if available
                 if previous_point is not None:
                     px_prev, py_prev = previous_point
-                    if abs(px_prev - x) <= 10 and abs(py_prev - y) <= 10:  # only interpolate if points are close
+                    if abs(px_prev - x) <= 15 and abs(py_prev - y) <= 15:  # only interpolate if points are close
                         interpolate(previous_point, (x, y))
-                    else:
-                        previous_point = (x, y)
+                    previous_point = (x, y) #always update previous point
             else:
                 previous_point = None
         else:
             previous_point = None
-
+    show_map()
     # Reset pan servo to center after scan
     px.set_cam_pan_angle(0)
 
@@ -287,6 +287,20 @@ def turn_right(seconds):
     time.sleep(seconds)
     px.stop()
     px.set_dir_servo_angle(0)
+
+plt.ion()  # interactive mode
+
+_fig, _ax = plt.subplots()
+_img = _ax.imshow(grid_map, origin="lower", vmin=0, vmax=1)
+_ax.set_title("Obstacle Map (1=obstacle)")
+plt.show()
+
+def show_map():
+    _img.set_data(grid_map)
+    _ax.set_xlabel("x (cells)")
+    _ax.set_ylabel("y (cells)")
+    _fig.canvas.draw()
+    _fig.canvas.flush_events()
 
 
 if __name__ == "__main__":
