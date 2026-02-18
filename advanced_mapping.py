@@ -1,3 +1,4 @@
+from turtle import distance
 import numpy as np
 import math
 import time
@@ -14,7 +15,7 @@ ANGLE_STEP = 5
 OBSTACLE_THRESHOLD = 50   # distance threshold to mark cells as obstacles (cm)
 CM_PER_SEC = 10.0         # assumed speed of the car in cm/s when driving forward
 DRIVE_SPEED = 30          
-TURN_DEG_PER_SEC = 90.0   # assumed turn rate in degrees per second when turning
+TURN_DEG_PER_SEC = 45.0   # assumed turn rate in degrees per second when turning
 
 # Initialize the car and the map
 px = Picarx()
@@ -71,8 +72,12 @@ def mark_cell(x, y):
     param y: Y coordinate in cm
     type y: int
     """
-    if 0 <= x < MAP_SIZE and 0 <= y < MAP_SIZE:
-        grid_map[y, x] = 1
+    for dx in range(-1, 2):
+        for dy in range(-1, 2):
+            nx = x + dx
+            ny = y + dy
+            if 0 <= nx < MAP_SIZE and 0 <= ny < MAP_SIZE:
+                grid_map[ny, nx] = 1
 
 def interpolate(point1, point2):
     """
@@ -135,6 +140,7 @@ def scan_environment():
     """
     previous_point = None
     blocked_ahead = False
+    previous_distance = None
 
     left_hits = 0
     right_hits = 0
@@ -150,8 +156,15 @@ def scan_environment():
         _ = px.ultrasonic.read()   # discard first reading after moving servo to allow it to stabilize
         time.sleep(0.03)
 
-        distance = read_distance_median()  # get a more reliable distance reading using the median
+        distance = read_distance_median(samples=7)  # get a more reliable distance reading using the median
         print(f'Angle: {servo_angle}, Distance: {distance}')
+
+        if distance is not None and previous_distance is not None:
+            if abs(distance - previous_distance) > 8:
+                previous_point = None  # break interpolation if jump is large
+
+        previous_distance = distance
+
 
         if distance is None:
             previous_point = None
@@ -180,10 +193,9 @@ def scan_environment():
 
                 # Interpolate with previous detection if available
                 if previous_point is not None:
-                    px_prev, py_prev = previous_point
-                    if abs(px_prev - x) <= 15 and abs(py_prev - y) <= 15:  # only interpolate if points are close
                         interpolate(previous_point, (x, y))
-                    previous_point = (x, y) #always update previous point
+                previous_point = (x, y)
+
             else:
                 previous_point = None
         else:
@@ -266,6 +278,7 @@ def turn_left(seconds):
     type seconds: float
     """
     global car_theta
+    car_theta += math.radians(TURN_DEG_PER_SEC * seconds)
 
     px.set_dir_servo_angle(-30)
     px.forward(DRIVE_SPEED)
@@ -281,6 +294,7 @@ def turn_right(seconds):
     type seconds: float
     """
     global car_theta
+    car_theta -= math.radians(TURN_DEG_PER_SEC * seconds)
 
     px.set_dir_servo_angle(30)
     px.forward(DRIVE_SPEED)
