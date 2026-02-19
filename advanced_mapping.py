@@ -100,7 +100,7 @@ def interpolate(point1, point2):
         y = int(y1 + i * (y2 - y1) / steps)
         mark_cell(x, y)
 
-def read_distance_median(samples = 5, delay = 0.02):
+def read_distance_median(samples = 7, delay = 0.02):
     """
     Read multiple ultrasonic sensor values and return the median to reduce noise.
     
@@ -149,7 +149,7 @@ def scan_environment():
         _ = px.ultrasonic.read()   # discard first reading after moving servo to allow it to stabilize
         time.sleep(0.03)
 
-        distance = read_distance_median(samples = 7)  # get a more reliable distance reading using the median
+        distance = read_distance_median()  # get a more reliable distance reading using the median
         print(f'Angle: {servo_angle}, Distance: {distance}')
 
         if distance is not None and previous_distance is not None:
