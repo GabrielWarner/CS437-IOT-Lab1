@@ -1,4 +1,3 @@
-from turtle import distance
 import numpy as np
 import math
 import time
@@ -63,9 +62,8 @@ def main():
 
 def mark_cell(x, y):
     """
-    Marks a single cell in the map as occupied (1) 
-    only when the ultrasonic sensor detects an object 
-    within the obstacle threshold.
+    Mark the cell at (x, y) as an obstacle in the grid map.
+    Also mark neighboring cells to create a more visible obstacle area.
 
     param x: X coordinate in cm
     type x: int
@@ -81,10 +79,7 @@ def mark_cell(x, y):
 
 def interpolate(point1, point2):
     """
-    This performs linear interpolation between two Cartesian points
-    by filling in intermediate map cells between two detected obstacle points
-    to approximate a continuous obstacle surface detected by
-    consecutive ultrasonic measurements.
+    Mark cells along the line between two detected obstacle points to create a more continuous map.
 
     param point1: First detected obstacle point (x, y)
     type point1: tuple of (int, int)
@@ -130,16 +125,14 @@ def read_distance_median(samples = 5, delay = 0.02):
 
 def scan_environment():
     """
-    Perform a sweep of the ultrasonic sensor using the pan servo
-    across a range of angles to detect nearby obstacles.
+    Rotate the pan servo to scan the environment in front of the car.
+    Mark detected obstacles on the grid map and count hits in left, right, and center zones
+    to make a decision on where to drive next.
 
-    return: 'center' if obstacle is directly ahead,
-            'left' if obstacles are stronger on the left,
-            'right' if obstacles are stronger on the right,
-             None if path is clear
+    return: Decision on where to drive next ('left', 'right', 'center', or None)
+    rtype: str or None
     """
     previous_point = None
-    blocked_ahead = False
     previous_distance = None
 
     left_hits = 0
@@ -156,7 +149,7 @@ def scan_environment():
         _ = px.ultrasonic.read()   # discard first reading after moving servo to allow it to stabilize
         time.sleep(0.03)
 
-        distance = read_distance_median(samples=7)  # get a more reliable distance reading using the median
+        distance = read_distance_median(samples = 7)  # get a more reliable distance reading using the median
         print(f'Angle: {servo_angle}, Distance: {distance}')
 
         if distance is not None and previous_distance is not None:
@@ -200,7 +193,10 @@ def scan_environment():
                 previous_point = None
         else:
             previous_point = None
+
+    # Update the displayed map after scanning
     show_map()
+
     # Reset pan servo to center after scan
     px.set_cam_pan_angle(0)
 
@@ -278,13 +274,14 @@ def turn_left(seconds):
     type seconds: float
     """
     global car_theta
-    car_theta += math.radians(TURN_DEG_PER_SEC * seconds)
 
     px.set_dir_servo_angle(-30)
     px.forward(DRIVE_SPEED)
     time.sleep(seconds)
     px.stop()
     px.set_dir_servo_angle(0)
+
+    car_theta = (car_theta + math.radians(TURN_DEG_PER_SEC * seconds)) % (2 * math.pi)
 
 def turn_right(seconds):
     """
@@ -294,25 +291,30 @@ def turn_right(seconds):
     type seconds: float
     """
     global car_theta
-    car_theta -= math.radians(TURN_DEG_PER_SEC * seconds)
-
+  
     px.set_dir_servo_angle(30)
     px.forward(DRIVE_SPEED)
     time.sleep(seconds)
     px.stop()
     px.set_dir_servo_angle(0)
 
+    car_theta = (car_theta - math.radians(TURN_DEG_PER_SEC * seconds)) % (2 * math.pi)
+    
 plt.ion()  # interactive mode
 
 _fig, _ax = plt.subplots()
-_img = _ax.imshow(grid_map, origin="lower", vmin=0, vmax=1)
-_ax.set_title("Obstacle Map (1=obstacle)")
+_img = _ax.imshow(grid_map, origin='lower', vmin=0, vmax=1)
+_ax.set_title('Obstacle Map (1=obstacle)')
+
 plt.show()
 
 def show_map():
+    """
+    Update the displayed map with the current grid_map data.
+    """
     _img.set_data(grid_map)
-    _ax.set_xlabel("x (cells)")
-    _ax.set_ylabel("y (cells)")
+    _ax.set_xlabel('x (cells)')
+    _ax.set_ylabel('y (cells)')
     _fig.canvas.draw()
     _fig.canvas.flush_events()
 
