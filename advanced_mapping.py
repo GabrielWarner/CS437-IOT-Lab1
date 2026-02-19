@@ -3,6 +3,7 @@ import math
 import time
 from picarx import Picarx
 import matplotlib.pyplot as plt
+import matplotlib.patches as patches
 
 # Constants
 MAP_SIZE = 100            # 100 x 100 grid
@@ -15,6 +16,8 @@ OBSTACLE_THRESHOLD = 50   # distance threshold to mark cells as obstacles (cm)
 CM_PER_SEC = 10.0         # assumed speed of the car in cm/s when driving forward
 DRIVE_SPEED = 30          
 TURN_DEG_PER_SEC = 45.0   # assumed turn rate in degrees per second when turning
+_robot_artists = []  # holds the rectangle + line so we can remove them
+ROBOT_MARGIN = 15  # extra visible space below the map
 
 # Initialize the car and the map
 px = Picarx()
@@ -299,6 +302,33 @@ def turn_right(seconds):
     px.set_dir_servo_angle(0)
 
     car_theta = (car_theta - math.radians(TURN_DEG_PER_SEC * seconds)) % (2 * math.pi)
+
+# Robot drawing
+def draw_robot(ax, x, y, theta):
+    """
+    Draw the robot as a rectangle with a heading line.
+    Robot is drawn OUTSIDE the map (below y=0), with its front at (x, y).
+    """
+    ROBOT_WIDTH = 8
+    ROBOT_LENGTH = 12
+    HEADING_LENGTH = 10
+
+    # CHANGED: draw the body BELOW the front point so it's outside the map
+    rect = patches.Rectangle(
+        (x - ROBOT_WIDTH / 2, y - ROBOT_LENGTH),  # body extends downward
+        ROBOT_WIDTH,
+        ROBOT_LENGTH,
+        linewidth=2,
+        edgecolor="yellow",
+        facecolor="none"
+    )
+    ax.add_patch(rect)
+
+    hx = x + HEADING_LENGTH * math.cos(theta)
+    hy = y + HEADING_LENGTH * math.sin(theta)
+    line, = ax.plot([x, hx], [y, hy], color="cyan", linewidth=2)
+
+    return [rect, line]
     
 plt.ion()  # interactive mode
 
@@ -312,11 +342,22 @@ def show_map():
     """
     Update the displayed map with the current grid_map data.
     """
+    global _robot_artists
+
     _img.set_data(grid_map)
-    _ax.set_xlabel('x (cells)')
-    _ax.set_ylabel('y (cells)')
+
+    for a in _robot_artists:
+        a.remove()
+
+    _robot_artists = draw_robot(_ax, car_x, car_y, car_theta)
+
+    _ax.set_xlim(0, MAP_SIZE)
+    _ax.set_ylim(-ROBOT_MARGIN, MAP_SIZE)  # show robot outside map for better visualization
+
     _fig.canvas.draw()
     _fig.canvas.flush_events()
+    plt.pause(0.001)
+
 
 
 if __name__ == "__main__":
