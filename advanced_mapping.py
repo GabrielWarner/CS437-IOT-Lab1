@@ -358,7 +358,7 @@ def show_map():
     _fig.canvas.flush_events()
     plt.pause(0.001)
 
-
+# A STAR PATHFINDING
 
 if __name__ == "__main__":
     main()
