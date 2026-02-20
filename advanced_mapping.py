@@ -5,21 +5,19 @@ from picarx import Picarx
 import matplotlib.pyplot as plt
 import matplotlib.patches as patches
 
-# Constants
-MAP_SIZE = 100            # 100 x 100 grid
-MAX_DISTANCE = 100        # max valid ultrasonic sensor reading (cm)
-CM_PER_CELL = 1.0          
+MAP_SIZE = 100
+MAX_DISTANCE = 100
+CM_PER_CELL = 1
 ANGLE_START = -60
 ANGLE_END = 60
 ANGLE_STEP = 5
-OBSTACLE_THRESHOLD = 50   # distance threshold to mark cells as obstacles (cm)
-CM_PER_SEC = 10.0         # assumed speed of the car in cm/s when driving forward
+OBSTACLE_THRESHOLD = 50
+CM_PER_SEC = 10
 DRIVE_SPEED = 30          
-TURN_DEG_PER_SEC = 45.0   # assumed turn rate in degrees per second when turning
-_robot_artists = []  # holds the rectangle + line so we can remove them
-ROBOT_MARGIN = 15  # extra visible space below the map
+TURN_DEG_PER_SEC = 45
+_robot_artists = []
+ROBOT_MARGIN = 15
 
-# Initialize the car and the map
 px = Picarx()
 grid_map = np.zeros((MAP_SIZE, MAP_SIZE))
 
@@ -42,18 +40,18 @@ def main():
 
             if decision == 'center':
                 px.stop()
-                reverse(0.5)  # back up a bit
-                turn_left(0.5)   # obstacle directly ahead
+                reverse(0.5)
+                turn_left(0.5)
             elif decision == 'left':
                 px.stop()
                 reverse(0.5)  
-                turn_right(0.4) # obstacle more on the left
+                turn_right(0.4)
             elif decision == 'right':
                 px.stop()
                 reverse(0.5)
-                turn_left(0.4)  # obstacle more on the right
+                turn_left(0.4)
             else:
-                drive_forward(0.60)  # path is clear
+                drive_forward(0.6)
 
             time.sleep(0.2)
 
@@ -117,8 +115,7 @@ def read_distance_median(samples = 7, delay = 0.02):
     vals = []
     for _ in range(samples):
         d = px.ultrasonic.read()
-        # Reject outliers and invalid readings
-        if d is not None and 0 < d <= MAX_DISTANCE:
+        if d is not None and 0 < d <= MAX_DISTANCE: # Reject outliers and invalid readings
             vals.append(d)
         time.sleep(delay)
     if not vals:
@@ -142,25 +139,24 @@ def scan_environment():
     right_hits = 0
     center_hits = 0
 
-    FRONT_ANGLE_WINDOW = 10     # consider obstacles within +/- 10 degrees as "ahead"
-    FRONT_STOP_CM = 25          # if an obstacle is detected within this distance in front, consider it blocked
+    FRONT_ANGLE_WINDOW = 10
+    FRONT_STOP_CM = 25
 
     for servo_angle in range(ANGLE_START, ANGLE_END + 1, ANGLE_STEP):
         px.set_cam_pan_angle(servo_angle)
         time.sleep(0.15)
 
-        _ = px.ultrasonic.read()   # discard first reading after moving servo to allow it to stabilize
+        _ = px.ultrasonic.read()
         time.sleep(0.03)
 
-        distance = read_distance_median()  # get a more reliable distance reading using the median
+        distance = read_distance_median()
         print(f'Angle: {servo_angle}, Distance: {distance}')
 
         if distance is not None and previous_distance is not None:
             if abs(distance - previous_distance) > 8:
-                previous_point = None  # break interpolation if jump is large
+                previous_point = None
 
         previous_distance = distance
-
 
         if distance is None:
             previous_point = None
@@ -183,11 +179,10 @@ def scan_environment():
             x = int(round(car_x + distance_cells * math.cos(angle_radians)))
             y = int(round(car_y + distance_cells * math.sin(angle_radians)))
 
+            # Mark cells and interpolate if within map bounds
             if 0 <= x < MAP_SIZE and 0 <= y < MAP_SIZE:
-                # Mark obstacle
                 mark_cell(x, y)
 
-                # Interpolate with previous detection if available
                 if previous_point is not None:
                         interpolate(previous_point, (x, y))
                 previous_point = (x, y)
@@ -211,7 +206,7 @@ def scan_environment():
     elif right_hits > left_hits:
         return 'right'
     else:
-        return None # path is clear
+        return None
 
 def clamp_pose():
     """
@@ -266,7 +261,6 @@ def reverse(seconds, speed = DRIVE_SPEED):
     time.sleep(seconds)
     px.stop()
 
-    # Update position estimate (reverse is negative forward motion)
     update_position(-CM_PER_SEC * seconds)
 
 def turn_left(seconds):
@@ -303,7 +297,6 @@ def turn_right(seconds):
 
     car_theta = (car_theta - math.radians(TURN_DEG_PER_SEC * seconds)) % (2 * math.pi)
 
-# Robot drawing
 def draw_robot(ax, x, y, theta):
     """
     Draw the robot as a rectangle with a heading line.
@@ -313,24 +306,23 @@ def draw_robot(ax, x, y, theta):
     ROBOT_LENGTH = 12
     HEADING_LENGTH = 10
 
-    # CHANGED: draw the body BELOW the front point so it's outside the map
     rect = patches.Rectangle(
-        (x - ROBOT_WIDTH / 2, y - ROBOT_LENGTH),  # body extends downward
+        (x - ROBOT_WIDTH / 2, y - ROBOT_LENGTH),
         ROBOT_WIDTH,
         ROBOT_LENGTH,
         linewidth=2,
-        edgecolor="yellow",
-        facecolor="none"
+        edgecolor='yellow',
+        facecolor='none'
     )
     ax.add_patch(rect)
 
     hx = x + HEADING_LENGTH * math.cos(theta)
     hy = y + HEADING_LENGTH * math.sin(theta)
-    line, = ax.plot([x, hx], [y, hy], color="cyan", linewidth=2)
+    line, = ax.plot([x, hx], [y, hy], color='cyan', linewidth=2)
 
     return [rect, line]
     
-plt.ion()  # interactive mode
+plt.ion()  # Enable interactive mode for live updates
 
 _fig, _ax = plt.subplots()
 _img = _ax.imshow(grid_map, origin='lower', vmin=0, vmax=1)
@@ -352,7 +344,7 @@ def show_map():
     _robot_artists = draw_robot(_ax, car_x, car_y, car_theta)
 
     _ax.set_xlim(0, MAP_SIZE)
-    _ax.set_ylim(-ROBOT_MARGIN, MAP_SIZE)  # show robot outside map for better visualization
+    _ax.set_ylim(-ROBOT_MARGIN, MAP_SIZE)
 
     _fig.canvas.draw()
     _fig.canvas.flush_events()
