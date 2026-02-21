@@ -1,6 +1,7 @@
 import numpy as np
 import math
 import time
+import heapq
 from picarx import Picarx
 import matplotlib.pyplot as plt
 import matplotlib.patches as patches
@@ -350,7 +351,255 @@ def show_map():
     _fig.canvas.flush_events()
     plt.pause(0.001)
 
-# A STAR PATHFINDING
+#  A* PATHFINDING - NOT TESTED
 
-if __name__ == "__main__":
-    main()
+SAFETY_BUFFER = 3          # cells of clearance around obstacles (mentioned in step 8, obstacle avoidance)
+REPLAN_STEPS  = 5          # follow this many steps before re-scanning / new pathfidn
+GOAL_TOLERANCE = 3         # num cells close enough to declare arrival / success
+
+
+def _inflate_obstacles(grid, buff=SAFETY_BUFFER):
+    """
+    Return a copy of grid where every obstacle cell has been expanded by
+    buff cells in every direction.  This keeps paths away from small gaps.
+    """
+    inflated = grid.copy()
+    obstacles = np.argwhere(grid == 1)          # (row=y, col=x)
+    for oy, ox in obstacles:
+        y_lo = max(0, oy - buff)
+        y_hi = min(grid.shape[0], oy + buff + 1)
+        x_lo = max(0, ox - buff)
+        x_hi = min(grid.shape[1], ox + buff + 1)
+        inflated[y_lo:y_hi, x_lo:x_hi] = 1
+    return inflated
+
+
+def heuristic(a, b):
+    """
+    Manhattan distance between two (x, y) tuples.
+    Used for astar algorithm to speed up calculation.
+    """
+    return abs(a[0] - b[0]) + abs(a[1] - b[1])
+
+
+def astar(grid, start, goal):
+    """
+    A* search on a 2-D grid (0 = free, 1 = obstacle).
+    Essentially Djikstra's algo / Breadth First Search (since edge weights are 1)
+    but with a heuristic to speed up computation.
+
+    :param grid:  numpy array (MAP_SIZE x MAP_SIZE), 0/1
+    :param start: (x, y) start cell
+    :param goal:  (x, y) goal cell
+    :return: list of (x, y) waypoints from start to goal, or None if
+             no path exists
+    """
+    rows, cols = grid.shape      # rows -> y, cols -> x
+
+    # Inflate obstacles so the car body has clearance
+    cost_map = _inflate_obstacles(grid)
+
+    # Ensure start/goal are not inside inflated obstacles
+    sx, sy = int(start[0]), int(start[1])
+    gx, gy = int(goal[0]),  int(goal[1])
+    if not (0 <= sx < cols and 0 <= sy < rows):
+        return None
+    if not (0 <= gx < cols and 0 <= gy < rows):
+        return None
+    # 4-connected neighbours (dx, dy)
+    DIRS = [(1, 0), (-1, 0), (0, 1), (0, -1)]
+
+    if cost_map[gy, gx] == 1:
+        # Goal is blocked -> BFS outward to find the nearest free cell
+        print('[astar] Goal is inside an inflated obstacle, searching for nearest free cell...')
+        from collections import deque
+        queue = deque([(gx, gy)])
+        visited = {(gx, gy)}
+        found = None
+        while queue:
+            fx, fy = queue.popleft()
+            if cost_map[fy, fx] == 0:
+                found = (fx, fy)
+                break
+            for ddx, ddy in DIRS:
+                nnx, nny = fx + ddx, fy + ddy
+                if 0 <= nnx < cols and 0 <= nny < rows and (nnx, nny) not in visited:
+                    visited.add((nnx, nny))
+                    queue.append((nnx, nny))
+        if found is None:
+            print('[astar] No reachable free cell near goal.')
+            return None
+        gx, gy = found
+        print(f'[astar] Rerouting to nearest free cell: ({gx}, {gy})')
+
+    open_set = []   # min-heap of (f, x, y)
+    heapq.heappush(open_set, (0 + heuristic(start, goal), 0, sx, sy))
+    came_from = {} # dict for path building
+    g_score = {(sx, sy): 0}
+
+    while open_set:
+        f, g, cx, cy = heapq.heappop(open_set)
+
+        if (cx, cy) == (gx, gy):
+            # Reconstruct path
+            path = [(cx, cy)]
+            while (cx, cy) in came_from:
+                cx, cy = came_from[(cx, cy)]
+                path.append((cx, cy))
+            path.reverse()
+            return path
+
+        for dx, dy in DIRS:
+            nx, ny = cx + dx, cy + dy
+            if 0 <= nx < cols and 0 <= ny < rows and cost_map[ny, nx] == 0:
+                tentative_g = g + 1
+                if tentative_g < g_score.get((nx, ny), float('inf')):
+                    g_score[(nx, ny)] = tentative_g
+                    f_new = tentative_g + heuristic((nx, ny), (gx, gy))
+                    heapq.heappush(open_set, (f_new, tentative_g, nx, ny))
+                    came_from[(nx, ny)] = (cx, cy)
+
+    return None   # no path found
+
+
+def visualize_path(path):
+    """
+    Overlay the planned path on the matplotlib map as a green line.
+    """
+    if path is None:
+        return
+    xs = [p[0] for p in path]
+    ys = [p[1] for p in path]
+    _ax.plot(xs, ys, color='lime', linewidth=1.5, marker='.', markersize=2)
+    _fig.canvas.draw()
+    _fig.canvas.flush_events()
+    plt.pause(0.001)
+
+
+#  Movement helpers -> translate grid direction into physical car movement
+
+def _angle_between(target_rad, current_rad):
+    """
+    Signed shortest angular difference (radians).
+    """
+    diff = (target_rad - current_rad + math.pi) % (2 * math.pi) - math.pi
+    return diff
+
+
+def move_to_adjacent_cell(dx, dy):
+    """
+    Turn the car (if needed) to face the (dx, dy) direction and drive
+    forward one cell.
+
+    dx, dy \in {-1, 0, 1} -> only one is non-zero at a time (4-connected).
+    """
+    target_theta = math.atan2(dy, dx)   # desired world heading
+    angle_diff   = _angle_between(target_theta, car_theta)
+
+    # turn car toward the target direction
+    ANGLE_TOL = math.radians(10)
+    if abs(angle_diff) > ANGLE_TOL:
+        turn_time = abs(angle_diff) / math.radians(TURN_DEG_PER_SEC)
+        turn_time = max(0.15, min(turn_time, 2.0))   # clamp
+        if angle_diff > 0:
+            turn_left(turn_time)
+        else:
+            turn_right(turn_time)
+
+    # drive forward one cell
+    cell_distance = CM_PER_CELL
+    drive_time = cell_distance / CM_PER_SEC
+    drive_time = max(0.1, drive_time)
+    drive_forward(drive_time)
+
+
+#  Main navigation loop  (A* + periodic re-mapping)
+
+def navigate_to_goal(goal_x, goal_y, replan_steps=REPLAN_STEPS):
+    """
+    Drive the car from its current position to (goal_x, goal_y) using
+    repeated A* planning interleaved with environment re-scans.
+
+    :param goal_x: target X cell
+    :param goal_y: target Y cell
+    :param replan_steps: how many path steps to follow before re-scanning
+    """
+    goal = (int(goal_x), int(goal_y))
+    iteration = 0
+
+    while True:
+        iteration += 1
+        print(f'\n===== Navigation iteration {iteration} =====')
+        print(f'  Car  : ({car_x}, {car_y})  θ={math.degrees(car_theta):.0f}°')
+        print(f'  Goal : {goal}')
+
+        # check if we are close enough to the goal 
+        dist = heuristic((car_x, car_y), goal)
+        if dist <= GOAL_TOLERANCE:
+            print('\n Goal reached!')
+            px.stop()
+            return True
+
+        # scan and rebuild map 
+        scan_environment()
+
+        # plan with A* 
+        path = astar(grid_map, (car_x, car_y), goal)
+
+        if path is None or len(path) < 2:
+            print('[nav] No path found, trying a blind turn and re-scan')
+            turn_left(0.5)
+            continue
+
+        visualize_path(path)
+        print(f'  Path length: {len(path)} cells')
+
+        # follow the path for up to *replan_steps* moves 
+        for step_idx in range(1, min(replan_steps + 1, len(path))):
+            prev = path[step_idx - 1]
+            curr = path[step_idx]
+            dx = curr[0] - prev[0]
+            dy = curr[1] - prev[1]
+
+            print(f'  Step {step_idx}: ({prev[0]},{prev[1]}) -> '
+                  f'({curr[0]},{curr[1]})  Δ=({dx},{dy})')
+            move_to_adjacent_cell(dx, dy)
+
+            # Quick distance check, if something is very close, bail early
+            quick_dist = px.ultrasonic.read()
+            if quick_dist is not None and 0 < quick_dist < 15:
+                print('[nav] Close obstacle, re-planning early')
+                px.stop()
+                break
+
+        # After following partial path, loop back to re-scan & replan
+
+    return False   # should not reach here
+
+
+def navigation_main():
+    """
+    Entry point: ask for a goal and navigate using A* + ultrasonic mapping.
+    The original main() reactive-avoidance loop is still available if needed.
+    """
+    print('\n=== A* Navigation for PiCar-X ===')
+    print(f'Map size : {MAP_SIZE}x{MAP_SIZE} cells  ({CM_PER_CELL} cm/cell)')
+    print(f'Car start: ({car_x}, {car_y})\n')
+
+    gx = int(input('Goal X (0-{0}): '.format(MAP_SIZE - 1)))
+    gy = int(input('Goal Y (0-{0}): '.format(MAP_SIZE - 1)))
+
+    try:
+        navigate_to_goal(gx, gy)
+    except KeyboardInterrupt:
+        print('\nStopped by user')
+    finally:
+        px.stop()
+        px.set_dir_servo_angle(0)
+        px.set_cam_pan_angle(0)
+
+
+if __name__ == '__main__':
+    # To use the original reactive obstacle-avoidance loop instead, call:
+    #   main()
+    navigation_main()
