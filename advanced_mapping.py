@@ -1,3 +1,4 @@
+## KIND OF BUGGY
 import numpy as np
 import math
 import time
@@ -318,7 +319,7 @@ def turn_left(seconds):
     px.set_dir_servo_angle(-30)
     px.forward(TURN_SPEED)
     
-    v = LEFT_TURN_FWD_CM_PER_SEC # Forward speed during left turn (cm/s)
+    v = LEFT_TURN_FWD_CM_PER_SEC    # Forward speed during left turn (cm/s)
     omega = v / LEFT_TURN_RADIUS_CM # Turning rate (rad/s) based on turn radius
 
     # Update our estimated pose in small time steps while the car is turning
@@ -485,7 +486,7 @@ def show_map():
     _robot_artists = draw_robot(_ax, car_x, car_y, car_theta)
 
     _ax.set_xlim(0, MAP_SIZE)
-    _ax.set_ylim(-ROBOT_MARGIN, MAP_SIZE)  # show robot outside map for better visualization
+    _ax.set_ylim(-ROBOT_MARGIN, MAP_SIZE)  # Show robot outside map for better visualization
 
     _fig.canvas.draw()
     _fig.canvas.flush_events()
@@ -538,7 +539,7 @@ def astar(start, goal):
     param goal: Goal node (x, y)
     type goal: tuple
     return: List of nodes from start to goal, or None if no path found
-    rtype: list of tuples or None   
+    rtype: list of tuples or None
     """
     open_set = []
     heapq.heappush(open_set, (0, start))
@@ -552,7 +553,7 @@ def astar(start, goal):
         _, current = heapq.heappop(open_set)
 
         if current == goal:
-            # reconstruct path
+            # Reconstruct path
             path = []
             while current in came_from:
                 path.append(current)
@@ -659,21 +660,21 @@ def navigate_to_goal(goal, max_iters=50, steps_per_plan=STEPS_PER_PLAN):
         path = astar(start, goal)
 
         if not path:
-            print('No path found')
+            print('[PATH] No path found')
             return False
 
         # Planned path
-        print('Planned path:', path[:10], '... len =', len(path))
+        print('[PATH] Planned path:', path[:10], '... len =', len(path))
 
         if len(path) <= 1:
-            print('Arrived')
+            print('[GOAL] Arrived')
             return True
 
         # Execute a segment of the planned path
         execute_steps = min(steps_per_plan, len(path)-1)
         follow_path(path[:execute_steps+1], goal) 
 
-    print('Gave up after max attempts')
+    print('[PATH] Gave up after max attempts')
     return False
 
 
