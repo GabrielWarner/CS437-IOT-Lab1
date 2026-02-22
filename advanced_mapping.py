@@ -1,7 +1,6 @@
 import numpy as np
 import math
 import time
-import heapq
 from picarx import Picarx
 import matplotlib.pyplot as plt
 import matplotlib.patches as patches
@@ -20,13 +19,21 @@ DRIVE_SPEED = 5
 TURN_DEG_PER_SEC = 35.0   # rough estimate of turning speed in degrees per second (feel free to adjust based on testing)
 _robot_artists = []  # holds the rectangle + line so we can remove them
 ROBOT_MARGIN = 15  # extra visible space below the map
-CLEARANCE_RADIUS = 1 # increase or decrease based on map size
-STEPS_PER_PLAN = 5   # how many steps execute before replanning
+CLEARANCE_RADIUS = 0 # increase or decrease based on map size
+STEPS_PER_PLAN = 3   # how many steps execute before replanning
 
+# Turn tuning
+TURN_SPEED = DRIVE_SPEED
+LEFT_TURN_DEG_PER_SEC  = 45.0
+RIGHT_TURN_DEG_PER_SEC = 34.0
+DT_TURN = 0.02 # delta time for turn pose updates (seconds)
 # Forward drift during turning (cm per second)
 RIGHT_TURN_FWD_CM_PER_SEC = 16.0
 LEFT_TURN_FWD_CM_PER_SEC  = 13.0
+LEFT_TURN_RADIUS_CM  = 16.6
+RIGHT_TURN_RADIUS_CM = 27.0
 
+# Initialize the car and the map
 px = Picarx()
 grid_map = np.zeros((MAP_SIZE, MAP_SIZE))
 
@@ -41,7 +48,6 @@ def main():
     grid_map[:] = 0
     # goal grid coordinates (x, y) in cells
     goal = (12, 18)
-    # start with 1 while testing
     navigate_to_goal(goal=goal, steps_per_plan=STEPS_PER_PLAN)
 
     # """
@@ -135,7 +141,8 @@ def read_distance_median(samples = 7, delay = 0.02):
     vals = []
     for _ in range(samples):
         d = px.ultrasonic.read()
-        if d is not None and 0 < d <= MAX_DISTANCE: # Reject outliers and invalid readings
+        # Reject outliers and invalid readings
+        if d is not None and 0 < d <= MAX_DISTANCE:
             vals.append(d)
         time.sleep(delay)
     if not vals:
@@ -159,24 +166,25 @@ def scan_environment():
     right_hits = 0
     center_hits = 0
 
-    FRONT_ANGLE_WINDOW = 10
-    FRONT_STOP_CM = 25
+    FRONT_ANGLE_WINDOW = 10     # consider obstacles within +/- 10 degrees as "ahead"
+    FRONT_STOP_CM = 25          # if an obstacle is detected within this distance in front, consider it blocked
 
     for servo_angle in range(ANGLE_START, ANGLE_END + 1, ANGLE_STEP):
         px.set_cam_pan_angle(servo_angle)
         time.sleep(0.15)
 
-        _ = px.ultrasonic.read()
+        _ = px.ultrasonic.read()   # discard first reading after moving servo to allow it to stabilize
         time.sleep(0.03)
 
-        distance = read_distance_median()
+        distance = read_distance_median()  # get a more reliable distance reading using the median
         print(f'Angle: {servo_angle}, Distance: {distance}')
 
         if distance is not None and previous_distance is not None:
             if abs(distance - previous_distance) > 8:
-                previous_point = None
+                previous_point = None  # break interpolation if jump is large
 
         previous_distance = distance
+
 
         if distance is None:
             previous_point = None
@@ -199,10 +207,11 @@ def scan_environment():
             x = int(round(car_x + distance_cells * math.cos(angle_radians)))
             y = int(round(car_y + distance_cells * math.sin(angle_radians)))
 
-            # Mark cells and interpolate if within map bounds
             if 0 <= x < MAP_SIZE and 0 <= y < MAP_SIZE:
+                # Mark obstacle
                 mark_cell(x, y)
 
+                # Interpolate with previous detection if available
                 if previous_point is not None:
                         interpolate(previous_point, (x, y))
                 previous_point = (x, y)
@@ -230,7 +239,7 @@ def scan_environment():
     elif right_hits > left_hits:
         return 'right'
     else:
-        return None
+        return None # path is clear
 
 def clamp_pose():
     """
@@ -291,41 +300,120 @@ def reverse(seconds, speed = DRIVE_SPEED):
     time.sleep(seconds)
     px.stop()
 
+    # Update position estimate (reverse is negative forward motion)
     update_position(-CM_PER_SEC * seconds)
 
-def turn_left(seconds):
-    """
-    Turn the car left for a specified duration and update orientation estimate.
-
-    param seconds: Duration to turn in seconds
-    type seconds: float
-    """
-    global car_theta
-
-    px.set_dir_servo_angle(-30)
-    px.forward(DRIVE_SPEED)
+# reverse that doesnt update position estimate, used for turns
+def reverse_no_pose(seconds, speed=DRIVE_SPEED):
+    px.backward(speed)
     time.sleep(seconds)
     px.stop()
-    px.set_dir_servo_angle(0)
 
-    car_theta = (car_theta + math.radians(TURN_DEG_PER_SEC * seconds)) % (2 * math.pi)
+def turn_left(seconds):
+    px.set_dir_servo_angle(-30)
+    px.forward(TURN_SPEED)
+    # Use our measured forward speed during a left turn
+    v = LEFT_TURN_FWD_CM_PER_SEC
+    # Convert turn radius into turn rate (radians per second)
+    omega = v / LEFT_TURN_RADIUS_CM
+    # Update our estimated pose in small time steps while the car is turning
+    t = 0.0
+    while t < seconds:
+        dt = min(DT_TURN, seconds - t)
+        time.sleep(dt)
+        update_pose_arc(v, +omega, dt)
+        t += dt
+
+    px.stop()
+    px.set_dir_servo_angle(0)
 
 def turn_right(seconds):
-    """
-    Turn the car right for a specified duration and update orientation estimate.
-
-    param seconds: Duration to turn in seconds
-    type seconds: float
-    """
-    global car_theta
     px.set_dir_servo_angle(30)
-    px.forward(DRIVE_SPEED)
-    time.sleep(seconds)
+    px.forward(TURN_SPEED)
+
+    v = RIGHT_TURN_FWD_CM_PER_SEC
+    omega = v / RIGHT_TURN_RADIUS_CM
+
+    t = 0.0
+    while t < seconds:
+        dt = min(DT_TURN, seconds - t)
+        time.sleep(dt)
+        update_pose_arc(v, -omega, dt)
+        t += dt
+
     px.stop()
     px.set_dir_servo_angle(0)
 
-    car_theta = (car_theta - math.radians(TURN_DEG_PER_SEC * seconds)) % (2 * math.pi)
+# Turns in pulses and reverse a bit in between to reduce drift, repeat until we're facing the desired angle within a tolerance.
+def rotate_to_heading(desired_theta):
+    tol = math.radians(3)
+    max_pulse_deg = 15.0
+    settle = 0.02
+    backup_sec = 0.30
 
+    for _ in range(8):
+        diff = wrap_angle(desired_theta - car_theta)
+        if abs(diff) <= tol:
+            return
+
+        step_deg = min(max_pulse_deg, abs(math.degrees(diff)))
+        seconds = step_deg / (LEFT_TURN_DEG_PER_SEC if diff > 0 else RIGHT_TURN_DEG_PER_SEC)
+
+        # pulse turn
+        if diff > 0:
+            turn_left(seconds)
+        else:
+            turn_right(seconds)
+
+        reverse_no_pose(backup_sec)
+
+        # small settle to keep it smooth
+        px.stop()
+        time.sleep(settle)
+
+# TURN HELPERS
+
+def wrap_angle(a):
+    return (a + math.pi) % (2 * math.pi) - math.pi
+
+def update_pose_arc(speed_cm_s, turn_rate_rad_s, dt_s):
+    """
+    Update the car's pose when driving along an arc (turning).
+
+    speed_cm_s: forward speed in cm/s
+    turn_rate_rad_s: turning rate in rad/s (+ left, - right)
+    dt_s: time step in seconds
+    """
+    global car_x, car_y, car_theta
+
+    # Convert from grid cells to centimeters for smoother math
+    x_pos_cm = car_x * CM_PER_CELL
+    y_pos_cm = car_y * CM_PER_CELL
+    heading_rad = car_theta
+
+    if abs(turn_rate_rad_s) < 1e-6:
+        # Straight motion
+        x_pos_cm += speed_cm_s * dt_s * math.cos(heading_rad)
+        y_pos_cm += speed_cm_s * dt_s * math.sin(heading_rad)
+    else:
+        # Arc motion (turning)
+        turn_radius_cm = speed_cm_s / turn_rate_rad_s
+        heading_change_rad = turn_rate_rad_s * dt_s
+
+        x_pos_cm += turn_radius_cm * (math.sin(heading_rad + heading_change_rad) - math.sin(heading_rad))
+        y_pos_cm -= turn_radius_cm * (math.cos(heading_rad + heading_change_rad) - math.cos(heading_rad))
+        heading_rad += heading_change_rad
+
+    # Save updated heading
+    car_theta = heading_rad % (2 * math.pi)
+
+    # Convert back to grid cells for planning/drawing
+    car_x = int(round(x_pos_cm / CM_PER_CELL))
+    car_y = int(round(y_pos_cm / CM_PER_CELL))
+    clamp_pose()
+
+
+# Robot drawing + map display
 def draw_robot(ax, x, y, theta):
     """
     Draw the robot as a rectangle with a heading line.
@@ -335,23 +423,24 @@ def draw_robot(ax, x, y, theta):
     ROBOT_LENGTH = 12
     HEADING_LENGTH = 10
 
+    # CHANGED: draw the body BELOW the front point so it's outside the map
     rect = patches.Rectangle(
-        (x - ROBOT_WIDTH / 2, y - ROBOT_LENGTH),
+        (x - ROBOT_WIDTH / 2, y - ROBOT_LENGTH),  # body extends downward
         ROBOT_WIDTH,
         ROBOT_LENGTH,
         linewidth=2,
-        edgecolor='yellow',
-        facecolor='none'
+        edgecolor="yellow",
+        facecolor="none"
     )
     ax.add_patch(rect)
 
     hx = x + HEADING_LENGTH * math.cos(theta)
     hy = y + HEADING_LENGTH * math.sin(theta)
-    line, = ax.plot([x, hx], [y, hy], color='cyan', linewidth=2)
+    line, = ax.plot([x, hx], [y, hy], color="cyan", linewidth=2)
 
     return [rect, line]
     
-plt.ion()  # Enable interactive mode for live updates
+plt.ion()  # interactive mode
 
 _fig, _ax = plt.subplots()
 _img = _ax.imshow(grid_map, origin='lower', vmin=0, vmax=1)
@@ -373,13 +462,13 @@ def show_map():
     _robot_artists = draw_robot(_ax, car_x, car_y, car_theta)
 
     _ax.set_xlim(0, MAP_SIZE)
-    _ax.set_ylim(-ROBOT_MARGIN, MAP_SIZE)
+    _ax.set_ylim(-ROBOT_MARGIN, MAP_SIZE)  # show robot outside map for better visualization
 
     _fig.canvas.draw()
     _fig.canvas.flush_events()
     plt.pause(0.001)
 
-# A STAR PATHFINDING
+# A* Pathfinding implementation
 def heuristic(a, b):
     return abs(a[0] - b[0]) + abs(a[1] - b[1])
 def get_neighbors(node):
@@ -515,30 +604,5 @@ def navigate_to_goal(goal, max_iters=50, steps_per_plan=STEPS_PER_PLAN):
     print("Gave up after max attempts")
     return False
 
-# Rotate to a specific heading (in radians) by turning left or right as needed.
-# roughly estimates how long to turn based on the angle difference and the TURN_DEG_PER_SEC constant.
-def rotate_to_heading(desired_theta):
-    global car_theta
-
-    diff = (desired_theta - car_theta + math.pi) % (2 * math.pi) - math.pi
-
-    if abs(diff) < math.radians(5):
-        car_theta = desired_theta
-        return
-
-    if diff > 0:
-        # turning left
-        seconds = abs(math.degrees(diff)) / TURN_DEG_PER_SEC
-        turn_left(seconds)
-    else:
-        # turning right
-        seconds = abs(math.degrees(diff)) / TURN_DEG_PER_SEC
-        turn_right(seconds)
-
-    # snap estimate
-    car_theta = desired_theta
-
-if __name__ == '__main__':
-    # To use the original reactive obstacle-avoidance loop instead, call:
-    #   main()
-    navigation_main()
+if __name__ == "__main__":
+    main()
