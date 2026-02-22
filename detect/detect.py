@@ -68,6 +68,9 @@ def run(model: str, camera_id: int, width: int, height: int, num_threads: int,
   counter, fps = 0, 0
   start_time = time.time()
 
+  last_stop_sign_print_time = 0.0
+  stop_sign_print_cooldown_sec = 0.5
+
   # Optimized: Replaced cap = cv2.VideoCapture with VideoStream class.
   # Start capturing video input from the camera in a separate thread.
   vs = VideoStream(src=camera_id, width=width, height=height).start()
@@ -107,6 +110,27 @@ def run(model: str, camera_id: int, width: int, height: int, num_threads: int,
 
     # Run object detection estimation using the model.
     detection_result = detector.detect(input_tensor)
+
+    # STOP SIGN: Terminal output when a stop sign is detected.
+    stop_sign_seen = False
+    best_stop_sign_confidence = 0.0
+    for detection in detection_result.detections:
+      if not detection.categories:
+        continue
+
+      category = detection.categories[0]
+      label = (category.category_name or '').strip().lower()
+      normalized_label = label.replace('_', ' ').replace('-', ' ')
+
+      if normalized_label == 'stop sign':
+        stop_sign_seen = True
+        best_stop_sign_confidence = max(best_stop_sign_confidence, category.score)
+
+      if stop_sign_seen:
+        now = time.time()
+        if now - last_stop_sign_print_time >= stop_sign_print_cooldown_sec:
+          print(f'[DETECT] stop sign detected (confidence={best_stop_sign_confidence:.4f})')
+          last_stop_sign_print_time = now
 
     # Draw keypoints and edges on input image
     image = utils.visualize(image, detection_result)
