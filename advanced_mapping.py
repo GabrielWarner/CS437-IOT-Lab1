@@ -1,24 +1,39 @@
 import numpy as np
 import math
 import time
-import heapq
 from picarx import Picarx
 import matplotlib.pyplot as plt
 import matplotlib.patches as patches
+import heapq
 
-MAP_SIZE = 100
-MAX_DISTANCE = 100
-CM_PER_CELL = 1
+# Constants
+MAP_SIZE = 20            # 20x20 grid
+MAX_DISTANCE = 100        # max valid ultrasonic sensor reading (cm)
+CM_PER_CELL = 5          
 ANGLE_START = -60
 ANGLE_END = 60
 ANGLE_STEP = 5
-OBSTACLE_THRESHOLD = 50
-CM_PER_SEC = 10
-DRIVE_SPEED = 30          
-TURN_DEG_PER_SEC = 45
-_robot_artists = []
-ROBOT_MARGIN = 15
+OBSTACLE_THRESHOLD = 100   # distance threshold to mark cells as obstacles (cm)
+CM_PER_SEC = 20.0        # measured with car moving forward at  using tape measure
+DRIVE_SPEED = 5          
+TURN_DEG_PER_SEC = 35.0   # rough estimate of turning speed in degrees per second (feel free to adjust based on testing)
+_robot_artists = []  # holds the rectangle + line so we can remove them
+ROBOT_MARGIN = 15  # extra visible space below the map
+CLEARANCE_RADIUS = 0 # increase or decrease based on map size
+STEPS_PER_PLAN = 3   # how many steps execute before replanning
 
+# Turn tuning
+TURN_SPEED = DRIVE_SPEED
+LEFT_TURN_DEG_PER_SEC  = 45.0
+RIGHT_TURN_DEG_PER_SEC = 34.0
+DT_TURN = 0.02 # delta time for turn pose updates (seconds)
+# Forward drift during turning (cm per second)
+RIGHT_TURN_FWD_CM_PER_SEC = 16.0
+LEFT_TURN_FWD_CM_PER_SEC  = 13.0
+LEFT_TURN_RADIUS_CM  = 16.6
+RIGHT_TURN_RADIUS_CM = 27.0
+
+# Initialize the car and the map
 px = Picarx()
 grid_map = np.zeros((MAP_SIZE, MAP_SIZE))
 
@@ -28,56 +43,66 @@ car_y = 0
 car_theta = math.pi / 2  # car starts facing the positive y direction (90 degrees)
 
 def main():
-    """
-    Drive the car forward while repeatedly scanning the environment.
-    Runs for a fixed number of iterations or until stopped by the user.
-    """
-    try:
-        for step in range(5):
-            print(f'Main loop iteration: {step + 1}/5')
+    global grid_map
 
-            decision = scan_environment()
-            print(f'\nDecision: {decision}\n')
+    grid_map[:] = 0
+    # goal grid coordinates (x, y) in cells
+    goal = (12, 18)
+    navigate_to_goal(goal=goal, steps_per_plan=STEPS_PER_PLAN)
 
-            if decision == 'center':
-                px.stop()
-                reverse(0.5)
-                turn_left(0.5)
-            elif decision == 'left':
-                px.stop()
-                reverse(0.5)  
-                turn_right(0.4)
-            elif decision == 'right':
-                px.stop()
-                reverse(0.5)
-                turn_left(0.4)
-            else:
-                drive_forward(0.6)
+    # """
+    # Drive the car forward while repeatedly scanning the environment.
+    # Runs for a fixed number of iterations or until stopped by the user.
+    # """
+    # try:
+    #     for step in range(5):
+    #         print(f'Main loop iteration: {step + 1}/5')
 
-            time.sleep(0.2)
+    #         decision = scan_environment()
+    #         print(f'\nDecision: {decision}\n')
 
-    except KeyboardInterrupt:
-        print('Stopped by user')
+    #         if decision == 'center':
+    #             px.stop()
+    #             reverse(0.5)  # back up a bit
+    #             turn_left(0.5)   # obstacle directly ahead
+    #         elif decision == 'left':
+    #             px.stop()
+    #             reverse(0.5)  
+    #             turn_right(0.4) # obstacle more on the left
+    #         elif decision == 'right':
+    #             px.stop()
+    #             reverse(0.5)
+    #             turn_left(0.4)  # obstacle more on the right
+    #         else:
+    #             drive_forward(0.60)  # path is clear
 
-    finally:
-        px.stop()
+    #         time.sleep(0.2)
+
+    # except KeyboardInterrupt:
+    #     print('Stopped by user')
+
+    # finally:
+    #         px.stop()
 
 def mark_cell(x, y):
     """
-    Mark the cell at (x, y) as an obstacle in the grid map.
-    Also mark neighboring cells to create a more visible obstacle area.
+    Mark a cell as an obstacle and clear surrounding cells within the clearance radius.
 
     param x: X coordinate in cm
     type x: int
     param y: Y coordinate in cm
     type y: int
     """
-    for dx in range(-1, 2):
-        for dy in range(-1, 2):
-            nx = x + dx
-            ny = y + dy
-            if 0 <= nx < MAP_SIZE and 0 <= ny < MAP_SIZE:
-                grid_map[ny, nx] = 1
+    for dx in range(-CLEARANCE_RADIUS, CLEARANCE_RADIUS + 1):
+        for dy in range(-CLEARANCE_RADIUS, CLEARANCE_RADIUS + 1):
+
+            if dx*dx + dy*dy <= CLEARANCE_RADIUS*CLEARANCE_RADIUS:
+
+                nx = x + dx
+                ny = y + dy
+
+                if 0 <= nx < MAP_SIZE and 0 <= ny < MAP_SIZE:
+                    grid_map[ny, nx] = 1
 
 def interpolate(point1, point2):
     """
@@ -116,7 +141,8 @@ def read_distance_median(samples = 7, delay = 0.02):
     vals = []
     for _ in range(samples):
         d = px.ultrasonic.read()
-        if d is not None and 0 < d <= MAX_DISTANCE: # Reject outliers and invalid readings
+        # Reject outliers and invalid readings
+        if d is not None and 0 < d <= MAX_DISTANCE:
             vals.append(d)
         time.sleep(delay)
     if not vals:
@@ -140,24 +166,25 @@ def scan_environment():
     right_hits = 0
     center_hits = 0
 
-    FRONT_ANGLE_WINDOW = 10
-    FRONT_STOP_CM = 25
+    FRONT_ANGLE_WINDOW = 10     # consider obstacles within +/- 10 degrees as "ahead"
+    FRONT_STOP_CM = 25          # if an obstacle is detected within this distance in front, consider it blocked
 
     for servo_angle in range(ANGLE_START, ANGLE_END + 1, ANGLE_STEP):
         px.set_cam_pan_angle(servo_angle)
         time.sleep(0.15)
 
-        _ = px.ultrasonic.read()
+        _ = px.ultrasonic.read()   # discard first reading after moving servo to allow it to stabilize
         time.sleep(0.03)
 
-        distance = read_distance_median()
+        distance = read_distance_median()  # get a more reliable distance reading using the median
         print(f'Angle: {servo_angle}, Distance: {distance}')
 
         if distance is not None and previous_distance is not None:
             if abs(distance - previous_distance) > 8:
-                previous_point = None
+                previous_point = None  # break interpolation if jump is large
 
         previous_distance = distance
+
 
         if distance is None:
             previous_point = None
@@ -180,10 +207,11 @@ def scan_environment():
             x = int(round(car_x + distance_cells * math.cos(angle_radians)))
             y = int(round(car_y + distance_cells * math.sin(angle_radians)))
 
-            # Mark cells and interpolate if within map bounds
             if 0 <= x < MAP_SIZE and 0 <= y < MAP_SIZE:
+                # Mark obstacle
                 mark_cell(x, y)
 
+                # Interpolate with previous detection if available
                 if previous_point is not None:
                         interpolate(previous_point, (x, y))
                 previous_point = (x, y)
@@ -193,11 +221,15 @@ def scan_environment():
         else:
             previous_point = None
 
-    # Update the displayed map after scanning
-    show_map()
+    # CHANGED: Moved to follow_path so the map updates after the car moves.
+    # show_map()
 
     # Reset pan servo to center after scan
     px.set_cam_pan_angle(0)
+
+    # Debug print of current pose and obstacle count
+    print("Pose:", car_x, car_y, "theta(deg):", round(math.degrees(car_theta), 1))
+    print("Obstacle cells:", int(grid_map.sum()))
 
     # Decide on action based on hit counts
     if center_hits > 0:
@@ -207,7 +239,7 @@ def scan_environment():
     elif right_hits > left_hits:
         return 'right'
     else:
-        return None
+        return None # path is clear
 
 def clamp_pose():
     """
@@ -234,10 +266,11 @@ def update_position(distance_cm):
 
     clamp_pose()
 
-def drive_forward(seconds, speed = DRIVE_SPEED):
+def drive_forward(seconds, speed=DRIVE_SPEED):
     """
-    Drive the car forward for a specified duration and update position estimate.
-
+    Drive straight forward for `seconds`, then do a tiny reverse “brake tap”
+    to reduce rolling. Update position estimate based on time driven.
+    
     param seconds: Duration to drive forward in seconds
     type seconds: float
     param speed: Speed to drive at (0-100)
@@ -245,6 +278,11 @@ def drive_forward(seconds, speed = DRIVE_SPEED):
     """
     px.forward(speed)
     time.sleep(seconds)
+    px.stop()
+
+    # brake tap to reduce coasting
+    px.backward(speed)
+    time.sleep(0.05)
     px.stop()
 
     update_position(CM_PER_SEC * seconds)
@@ -262,42 +300,120 @@ def reverse(seconds, speed = DRIVE_SPEED):
     time.sleep(seconds)
     px.stop()
 
+    # Update position estimate (reverse is negative forward motion)
     update_position(-CM_PER_SEC * seconds)
 
-def turn_left(seconds):
-    """
-    Turn the car left for a specified duration and update orientation estimate.
-
-    param seconds: Duration to turn in seconds
-    type seconds: float
-    """
-    global car_theta
-
-    px.set_dir_servo_angle(-30)
-    px.forward(DRIVE_SPEED)
+# reverse that doesnt update position estimate, used for turns
+def reverse_no_pose(seconds, speed=DRIVE_SPEED):
+    px.backward(speed)
     time.sleep(seconds)
     px.stop()
-    px.set_dir_servo_angle(0)
 
-    car_theta = (car_theta + math.radians(TURN_DEG_PER_SEC * seconds)) % (2 * math.pi)
+def turn_left(seconds):
+    px.set_dir_servo_angle(-30)
+    px.forward(TURN_SPEED)
+    # Use our measured forward speed during a left turn
+    v = LEFT_TURN_FWD_CM_PER_SEC
+    # Convert turn radius into turn rate (radians per second)
+    omega = v / LEFT_TURN_RADIUS_CM
+    # Update our estimated pose in small time steps while the car is turning
+    t = 0.0
+    while t < seconds:
+        dt = min(DT_TURN, seconds - t)
+        time.sleep(dt)
+        update_pose_arc(v, +omega, dt)
+        t += dt
+
+    px.stop()
+    px.set_dir_servo_angle(0)
 
 def turn_right(seconds):
-    """
-    Turn the car right for a specified duration and update orientation estimate.
-
-    param seconds: Duration to turn in seconds
-    type seconds: float
-    """
-    global car_theta
-  
     px.set_dir_servo_angle(30)
-    px.forward(DRIVE_SPEED)
-    time.sleep(seconds)
+    px.forward(TURN_SPEED)
+
+    v = RIGHT_TURN_FWD_CM_PER_SEC
+    omega = v / RIGHT_TURN_RADIUS_CM
+
+    t = 0.0
+    while t < seconds:
+        dt = min(DT_TURN, seconds - t)
+        time.sleep(dt)
+        update_pose_arc(v, -omega, dt)
+        t += dt
+
     px.stop()
     px.set_dir_servo_angle(0)
 
-    car_theta = (car_theta - math.radians(TURN_DEG_PER_SEC * seconds)) % (2 * math.pi)
+# Turns in pulses and reverse a bit in between to reduce drift, repeat until we're facing the desired angle within a tolerance.
+def rotate_to_heading(desired_theta):
+    tol = math.radians(3)
+    max_pulse_deg = 15.0
+    settle = 0.02
+    backup_sec = 0.30
 
+    for _ in range(8):
+        diff = wrap_angle(desired_theta - car_theta)
+        if abs(diff) <= tol:
+            return
+
+        step_deg = min(max_pulse_deg, abs(math.degrees(diff)))
+        seconds = step_deg / (LEFT_TURN_DEG_PER_SEC if diff > 0 else RIGHT_TURN_DEG_PER_SEC)
+
+        # pulse turn
+        if diff > 0:
+            turn_left(seconds)
+        else:
+            turn_right(seconds)
+
+        reverse_no_pose(backup_sec)
+
+        # small settle to keep it smooth
+        px.stop()
+        time.sleep(settle)
+
+# TURN HELPERS
+
+def wrap_angle(a):
+    return (a + math.pi) % (2 * math.pi) - math.pi
+
+def update_pose_arc(speed_cm_s, turn_rate_rad_s, dt_s):
+    """
+    Update the car's pose when driving along an arc (turning).
+
+    speed_cm_s: forward speed in cm/s
+    turn_rate_rad_s: turning rate in rad/s (+ left, - right)
+    dt_s: time step in seconds
+    """
+    global car_x, car_y, car_theta
+
+    # Convert from grid cells to centimeters for smoother math
+    x_pos_cm = car_x * CM_PER_CELL
+    y_pos_cm = car_y * CM_PER_CELL
+    heading_rad = car_theta
+
+    if abs(turn_rate_rad_s) < 1e-6:
+        # Straight motion
+        x_pos_cm += speed_cm_s * dt_s * math.cos(heading_rad)
+        y_pos_cm += speed_cm_s * dt_s * math.sin(heading_rad)
+    else:
+        # Arc motion (turning)
+        turn_radius_cm = speed_cm_s / turn_rate_rad_s
+        heading_change_rad = turn_rate_rad_s * dt_s
+
+        x_pos_cm += turn_radius_cm * (math.sin(heading_rad + heading_change_rad) - math.sin(heading_rad))
+        y_pos_cm -= turn_radius_cm * (math.cos(heading_rad + heading_change_rad) - math.cos(heading_rad))
+        heading_rad += heading_change_rad
+
+    # Save updated heading
+    car_theta = heading_rad % (2 * math.pi)
+
+    # Convert back to grid cells for planning/drawing
+    car_x = int(round(x_pos_cm / CM_PER_CELL))
+    car_y = int(round(y_pos_cm / CM_PER_CELL))
+    clamp_pose()
+
+
+# Robot drawing + map display
 def draw_robot(ax, x, y, theta):
     """
     Draw the robot as a rectangle with a heading line.
@@ -307,23 +423,24 @@ def draw_robot(ax, x, y, theta):
     ROBOT_LENGTH = 12
     HEADING_LENGTH = 10
 
+    # CHANGED: draw the body BELOW the front point so it's outside the map
     rect = patches.Rectangle(
-        (x - ROBOT_WIDTH / 2, y - ROBOT_LENGTH),
+        (x - ROBOT_WIDTH / 2, y - ROBOT_LENGTH),  # body extends downward
         ROBOT_WIDTH,
         ROBOT_LENGTH,
         linewidth=2,
-        edgecolor='yellow',
-        facecolor='none'
+        edgecolor="yellow",
+        facecolor="none"
     )
     ax.add_patch(rect)
 
     hx = x + HEADING_LENGTH * math.cos(theta)
     hy = y + HEADING_LENGTH * math.sin(theta)
-    line, = ax.plot([x, hx], [y, hy], color='cyan', linewidth=2)
+    line, = ax.plot([x, hx], [y, hy], color="cyan", linewidth=2)
 
     return [rect, line]
     
-plt.ion()  # Enable interactive mode for live updates
+plt.ion()  # interactive mode
 
 _fig, _ax = plt.subplots()
 _img = _ax.imshow(grid_map, origin='lower', vmin=0, vmax=1)
@@ -345,261 +462,147 @@ def show_map():
     _robot_artists = draw_robot(_ax, car_x, car_y, car_theta)
 
     _ax.set_xlim(0, MAP_SIZE)
-    _ax.set_ylim(-ROBOT_MARGIN, MAP_SIZE)
+    _ax.set_ylim(-ROBOT_MARGIN, MAP_SIZE)  # show robot outside map for better visualization
 
     _fig.canvas.draw()
     _fig.canvas.flush_events()
     plt.pause(0.001)
 
-#  A* PATHFINDING - NOT TESTED
-
-SAFETY_BUFFER = 3          # cells of clearance around obstacles (mentioned in step 8, obstacle avoidance)
-REPLAN_STEPS  = 5          # follow this many steps before re-scanning / new pathfidn
-GOAL_TOLERANCE = 3         # num cells close enough to declare arrival / success
-
-
-def _inflate_obstacles(grid, buff=SAFETY_BUFFER):
-    """
-    Return a copy of grid where every obstacle cell has been expanded by
-    buff cells in every direction.  This keeps paths away from small gaps.
-    """
-    inflated = grid.copy()
-    obstacles = np.argwhere(grid == 1)          # (row=y, col=x)
-    for oy, ox in obstacles:
-        y_lo = max(0, oy - buff)
-        y_hi = min(grid.shape[0], oy + buff + 1)
-        x_lo = max(0, ox - buff)
-        x_hi = min(grid.shape[1], ox + buff + 1)
-        inflated[y_lo:y_hi, x_lo:x_hi] = 1
-    return inflated
-
-
+# A* Pathfinding implementation
 def heuristic(a, b):
-    """
-    Manhattan distance between two (x, y) tuples.
-    Used for astar algorithm to speed up calculation.
-    """
     return abs(a[0] - b[0]) + abs(a[1] - b[1])
-
-
-def astar(grid, start, goal):
+def get_neighbors(node):
     """
-    A* search on a 2-D grid (0 = free, 1 = obstacle).
-    Essentially Djikstra's algo / Breadth First Search (since edge weights are 1)
-    but with a heuristic to speed up computation.
-
-    :param grid:  numpy array (MAP_SIZE x MAP_SIZE), 0/1
-    :param start: (x, y) start cell
-    :param goal:  (x, y) goal cell
-    :return: list of (x, y) waypoints from start to goal, or None if
-             no path exists
+    Returns valid 4-direction neighbors (up, down, left, right).
     """
-    rows, cols = grid.shape      # rows -> y, cols -> x
+    x, y = node
+    neighbors = []
 
-    # Inflate obstacles so the car body has clearance
-    cost_map = _inflate_obstacles(grid)
+    directions = [(1,0), (-1,0), (0,1), (0,-1)]
 
-    # Ensure start/goal are not inside inflated obstacles
-    sx, sy = int(start[0]), int(start[1])
-    gx, gy = int(goal[0]),  int(goal[1])
-    if not (0 <= sx < cols and 0 <= sy < rows):
-        return None
-    if not (0 <= gx < cols and 0 <= gy < rows):
-        return None
-    # 4-connected neighbours (dx, dy)
-    DIRS = [(1, 0), (-1, 0), (0, 1), (0, -1)]
+    for dx, dy in directions:
+        nx, ny = x + dx, y + dy
 
-    if cost_map[gy, gx] == 1:
-        # Goal is blocked -> BFS outward to find the nearest free cell
-        print('[astar] Goal is inside an inflated obstacle, searching for nearest free cell...')
-        from collections import deque
-        queue = deque([(gx, gy)])
-        visited = {(gx, gy)}
-        found = None
-        while queue:
-            fx, fy = queue.popleft()
-            if cost_map[fy, fx] == 0:
-                found = (fx, fy)
-                break
-            for ddx, ddy in DIRS:
-                nnx, nny = fx + ddx, fy + ddy
-                if 0 <= nnx < cols and 0 <= nny < rows and (nnx, nny) not in visited:
-                    visited.add((nnx, nny))
-                    queue.append((nnx, nny))
-        if found is None:
-            print('[astar] No reachable free cell near goal.')
-            return None
-        gx, gy = found
-        print(f'[astar] Rerouting to nearest free cell: ({gx}, {gy})')
+        if 0 <= nx < MAP_SIZE and 0 <= ny < MAP_SIZE:
+            if grid_map[ny, nx] == 0:  # not an obstacle
+                neighbors.append((nx, ny))
 
-    open_set = []   # min-heap of (f, x, y)
-    heapq.heappush(open_set, (0 + heuristic(start, goal), 0, sx, sy))
-    came_from = {} # dict for path building
-    g_score = {(sx, sy): 0}
+    return neighbors
+
+def astar(start, goal):
+    """
+    A* algorithm implementation.
+    Returns path as list of (x, y) coordinates.
+    """
+
+    open_set = []
+    heapq.heappush(open_set, (0, start))
+
+    came_from = {}
+    g_score = {start: 0}
+
+    f_score = {start: heuristic(start, goal)}
 
     while open_set:
-        f, g, cx, cy = heapq.heappop(open_set)
+        _, current = heapq.heappop(open_set)
 
-        if (cx, cy) == (gx, gy):
-            # Reconstruct path
-            path = [(cx, cy)]
-            while (cx, cy) in came_from:
-                cx, cy = came_from[(cx, cy)]
-                path.append((cx, cy))
+        if current == goal:
+            # reconstruct path
+            path = []
+            while current in came_from:
+                path.append(current)
+                current = came_from[current]
+            path.append(start)
             path.reverse()
             return path
 
-        for dx, dy in DIRS:
-            nx, ny = cx + dx, cy + dy
-            if 0 <= nx < cols and 0 <= ny < rows and cost_map[ny, nx] == 0:
-                tentative_g = g + 1
-                if tentative_g < g_score.get((nx, ny), float('inf')):
-                    g_score[(nx, ny)] = tentative_g
-                    f_new = tentative_g + heuristic((nx, ny), (gx, gy))
-                    heapq.heappush(open_set, (f_new, tentative_g, nx, ny))
-                    came_from[(nx, ny)] = (cx, cy)
+        for neighbor in get_neighbors(current):
+            tentative_g = g_score[current] + 1
 
-    return None   # no path found
+            if neighbor not in g_score or tentative_g < g_score[neighbor]:
+                came_from[neighbor] = current
+                g_score[neighbor] = tentative_g
+                f = tentative_g + heuristic(neighbor, goal)
+                f_score[neighbor] = f
+                heapq.heappush(open_set, (f, neighbor))
 
+    return None  # no path found
 
-def visualize_path(path):
-    """
-    Overlay the planned path on the matplotlib map as a green line.
-    """
-    if path is None:
-        return
-    xs = [p[0] for p in path]
-    ys = [p[1] for p in path]
-    _ax.plot(xs, ys, color='lime', linewidth=1.5, marker='.', markersize=2)
-    _fig.canvas.draw()
-    _fig.canvas.flush_events()
-    plt.pause(0.001)
+# Execute the first part of the path, then replan
+def follow_path(path, goal):
+    global car_theta
 
+    seconds_per_cell = CM_PER_CELL / CM_PER_SEC
 
-#  Movement helpers -> translate grid direction into physical car movement
+    for i in range(1, len(path)):
+        current = path[i - 1]
+        target = path[i]
 
-def _angle_between(target_rad, current_rad):
-    """
-    Signed shortest angular difference (radians).
-    """
-    diff = (target_rad - current_rad + math.pi) % (2 * math.pi) - math.pi
-    return diff
+        dx = target[0] - current[0]
+        dy = target[1] - current[1]
 
-
-def move_to_adjacent_cell(dx, dy):
-    """
-    Turn the car (if needed) to face the (dx, dy) direction and drive
-    forward one cell.
-
-    dx, dy \in {-1, 0, 1} -> only one is non-zero at a time (4-connected).
-    """
-    target_theta = math.atan2(dy, dx)   # desired world heading
-    angle_diff   = _angle_between(target_theta, car_theta)
-
-    # turn car toward the target direction
-    ANGLE_TOL = math.radians(10)
-    if abs(angle_diff) > ANGLE_TOL:
-        turn_time = abs(angle_diff) / math.radians(TURN_DEG_PER_SEC)
-        turn_time = max(0.15, min(turn_time, 2.0))   # clamp
-        if angle_diff > 0:
-            turn_left(turn_time)
+        if dx == 1:
+            desired_theta = 0
+        elif dx == -1:
+            desired_theta = math.pi
+        elif dy == 1:
+            desired_theta = math.pi / 2
+        elif dy == -1:
+            desired_theta = 3 * math.pi / 2
         else:
-            turn_right(turn_time)
-
-    # drive forward one cell
-    cell_distance = CM_PER_CELL
-    drive_time = cell_distance / CM_PER_SEC
-    drive_time = max(0.1, drive_time)
-    drive_forward(drive_time)
-
-
-#  Main navigation loop  (A* + periodic re-mapping)
-
-def navigate_to_goal(goal_x, goal_y, replan_steps=REPLAN_STEPS):
-    """
-    Drive the car from its current position to (goal_x, goal_y) using
-    repeated A* planning interleaved with environment re-scans.
-
-    :param goal_x: target X cell
-    :param goal_y: target Y cell
-    :param replan_steps: how many path steps to follow before re-scanning
-    """
-    goal = (int(goal_x), int(goal_y))
-    iteration = 0
-
-    while True:
-        iteration += 1
-        print(f'\n===== Navigation iteration {iteration} =====')
-        print(f'  Car  : ({car_x}, {car_y})  θ={math.degrees(car_theta):.0f}°')
-        print(f'  Goal : {goal}')
-
-        # check if we are close enough to the goal 
-        dist = heuristic((car_x, car_y), goal)
-        if dist <= GOAL_TOLERANCE:
-            print('\n Goal reached!')
-            px.stop()
-            return True
-
-        # scan and rebuild map 
-        scan_environment()
-
-        # plan with A* 
-        path = astar(grid_map, (car_x, car_y), goal)
-
-        if path is None or len(path) < 2:
-            print('[nav] No path found, trying a blind turn and re-scan')
-            turn_left(0.5)
             continue
 
-        visualize_path(path)
-        print(f'  Path length: {len(path)} cells')
+        rotate_to_heading(desired_theta)
 
-        # follow the path for up to *replan_steps* moves 
-        for step_idx in range(1, min(replan_steps + 1, len(path))):
-            prev = path[step_idx - 1]
-            curr = path[step_idx]
-            dx = curr[0] - prev[0]
-            dy = curr[1] - prev[1]
+        # move exactly 1 cell
+        drive_forward(seconds_per_cell)
 
-            print(f'  Step {step_idx}: ({prev[0]},{prev[1]}) -> '
-                  f'({curr[0]},{curr[1]})  Δ=({dx},{dy})')
-            move_to_adjacent_cell(dx, dy)
+        if at_goal(goal=goal, tol_cells=1):
+            print("Arrived (during execution)")
+            px.stop()
+            return
 
-            # Quick distance check, if something is very close, bail early
-            quick_dist = px.ultrasonic.read()
-            if quick_dist is not None and 0 < quick_dist < 15:
-                print('[nav] Close obstacle, re-planning early')
-                px.stop()
-                break
+        show_map()
 
-        # After following partial path, loop back to re-scan & replan
+def at_goal(goal, tol_cells=1):
+    gx, gy = goal
+    return abs(car_x - gx) <= tol_cells and abs(car_y - gy) <= tol_cells
 
-    return False   # should not reach here
+# Main navigation loop: repeatedly scan, plan, and execute steps towards the goal
+def navigate_to_goal(goal, max_iters=50, steps_per_plan=STEPS_PER_PLAN):
+    global grid_map
 
-
-def navigation_main():
-    """
-    Entry point: ask for a goal and navigate using A* + ultrasonic mapping.
-    The original main() reactive-avoidance loop is still available if needed.
-    """
-    print('\n=== A* Navigation for PiCar-X ===')
-    print(f'Map size : {MAP_SIZE}x{MAP_SIZE} cells  ({CM_PER_CELL} cm/cell)')
-    print(f'Car start: ({car_x}, {car_y})\n')
-
-    gx = int(input('Goal X (0-{0}): '.format(MAP_SIZE - 1)))
-    gy = int(input('Goal Y (0-{0}): '.format(MAP_SIZE - 1)))
-
-    try:
-        navigate_to_goal(gx, gy)
-    except KeyboardInterrupt:
-        print('\nStopped by user')
-    finally:
+    if at_goal(goal, tol_cells=1):
+        print("Already at goal")
         px.stop()
-        px.set_dir_servo_angle(0)
-        px.set_cam_pan_angle(0)
+        return True
 
+    for _ in range(max_iters):
+        # rescan and rebuild map around current pose
+        grid_map[:] = 0
+        scan_environment()   # fills grid_map with obstacles (+ clearance)
 
-if __name__ == '__main__':
-    # To use the original reactive obstacle-avoidance loop instead, call:
-    #   main()
-    navigation_main()
+        # find path to goal using A*
+        start = (car_x, car_y)
+        path = astar(start, goal)
+
+        if not path:
+            print("No path found")
+            return False
+
+        # Debug print of planned path
+        print("Planned path:", path[:10], "... len =", len(path))
+
+        if len(path) <= 1:
+            print("Arrived")
+            return True
+
+        # executes # of STEPS_PER_PLAN steps along the path, then replans
+        execute_steps = min(steps_per_plan, len(path)-1)
+        follow_path(path[:execute_steps+1], goal)  # just a prefix
+
+    print("Gave up after max attempts")
+    return False
+
+if __name__ == "__main__":
+    main()
