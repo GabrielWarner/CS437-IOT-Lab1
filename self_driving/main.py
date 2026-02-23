@@ -481,7 +481,7 @@ def draw_robot(ax, x, y, theta):
 plt.ion()  # Interactive mode
 
 _fig, _ax = plt.subplots(figsize=(8, 8))
-_img = _ax.imshow(grid_map, origin='lower', vmin=0, vmax=1, cmap='Greys')
+_img = _ax.imshow(grid_map, origin='lower', vmin=0, vmax=1, cmap='Greys_r')
 _ax.set_title('Obstacle Map')
 
 # Legend
@@ -505,7 +505,7 @@ def show_map():
     global _robot_artists, _path_artists
 
     _img.set_data(grid_map)
-    _img.set_cmap('Greys')
+    _img.set_cmap('Greys_r')
 
     # Remove old robot and path drawings
     for a in _robot_artists:
