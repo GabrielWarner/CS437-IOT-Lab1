@@ -70,22 +70,22 @@ def main():
     od_thread.start()
 
     # --- Quick detection test: show object in front of camera within 10 sec ---
-    print('[TEST] Camera warming up... hold a stop sign or stand in front within 10 seconds.')
-    test_duration = 10
-    test_start = time.time()
-    while time.time() - test_start < test_duration:
-        if was_stop_sign_ever_detected():
-            print('[TEST] *** STOP SIGN detected! ***')
-        if was_person_ever_detected():
-            print('[TEST] *** PERSON detected! ***')
-        if was_stop_sign_ever_detected() or was_person_ever_detected():
-            break
-        time.sleep(0.5)
-    print(f'[TEST] Results after {test_duration}s window:')
-    print(f'[TEST]   Stop sign ever detected? {was_stop_sign_ever_detected()}')
-    print(f'[TEST]   Person ever detected?    {was_person_ever_detected()}')
-    print('[TEST] Detection test done. Starting navigation in 3 seconds...')
-    time.sleep(3)
+    # print('[TEST] Camera warming up... hold a stop sign or stand in front within 10 seconds.')
+    # test_duration = 10
+    # test_start = time.time()
+    # while time.time() - test_start < test_duration:
+    #     if was_stop_sign_ever_detected():
+    #         print('[TEST] *** STOP SIGN detected! ***')
+    #     if was_person_ever_detected():
+    #         print('[TEST] *** PERSON detected! ***')
+    #     if was_stop_sign_ever_detected() or was_person_ever_detected():
+    #         break
+    #     time.sleep(0.5)
+    # print(f'[TEST] Results after {test_duration}s window:')
+    # print(f'[TEST]   Stop sign ever detected? {was_stop_sign_ever_detected()}')
+    # print(f'[TEST]   Person ever detected?    {was_person_ever_detected()}')
+    # print('[TEST] Detection test done. Starting navigation in 3 seconds...')
+    # time.sleep(3)
 
     try:
         grid_map[:] = 0
