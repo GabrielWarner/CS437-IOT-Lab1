@@ -84,9 +84,8 @@ def run(model, camera_id, width, height, num_threads, enable_edgetpu, stop_event
             result = detector.detect(tensor)
             utils.visualize(frame, result)
             
-            # Optimized: sleep allows the OS to switch between the camera thread 
-            # and the inference thread efficiently, reducing CPU spikes.
-            time.sleep(0.01)
+            # Limit inference to ~2 FPS to reduce CPU usage
+            time.sleep(0.5)
     finally:
         vs.stop()
         utils.log("Detector stopped", "INFO")
