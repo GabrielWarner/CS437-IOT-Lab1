@@ -17,7 +17,7 @@ MAX_DISTANCE = 100        # max valid ultrasonic sensor reading (cm)
 CM_PER_CELL = 5          
 ANGLE_START = -60
 ANGLE_END = 60
-ANGLE_STEP = 5
+ANGLE_STEP = 10
 OBSTACLE_THRESHOLD = 100   # distance threshold to mark cells as obstacles (cm)
 CM_PER_SEC = 20.0        # measured with car moving forward at  using tape measure
 DRIVE_SPEED = 5          
@@ -151,7 +151,7 @@ def interpolate(point1, point2):
         y = int(y1 + i * (y2 - y1) / steps)
         mark_cell(x, y)
 
-def read_distance_median(samples = 7, delay = 0.02):
+def read_distance_median(samples = 5, delay = 0.02):
     """
     Read multiple ultrasonic sensor values and return the median to reduce noise.
     
@@ -195,10 +195,10 @@ def scan_environment():
 
     for servo_angle in range(ANGLE_START, ANGLE_END + 1, ANGLE_STEP):
         px.set_cam_pan_angle(servo_angle)
-        time.sleep(0.15)
+        time.sleep(0.08)
 
         _ = px.ultrasonic.read()   # discard first reading after moving servo to allow it to stabilize
-        time.sleep(0.03)
+        time.sleep(0.02)
 
         distance = read_distance_median()  # get a more reliable distance reading using the median
         print(f'Angle: {servo_angle}, Distance: {distance}')
