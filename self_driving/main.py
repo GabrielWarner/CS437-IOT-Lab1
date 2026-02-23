@@ -152,10 +152,11 @@ def read_distance_median(samples = 7, delay = 0.02):
     return: Median distance reading in cm, or None if no valid readings
     rtype: float or None
     """
+    MIN_DISTANCE = 3  # Reject spurious near-zero readings (sensor timeout/no-echo)
     vals = []
     for _ in range(samples):
         d = px.ultrasonic.read()
-        if d is not None and 0 < d <= MAX_DISTANCE: # Reject outliers and invalid readings
+        if d is not None and MIN_DISTANCE < d <= MAX_DISTANCE: # Reject outliers and invalid readings
             vals.append(d)
         time.sleep(delay)
     if not vals:
