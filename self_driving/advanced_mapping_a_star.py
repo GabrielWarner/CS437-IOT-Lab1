@@ -5,12 +5,9 @@ from picarx import Picarx
 import matplotlib.pyplot as plt
 import matplotlib.patches as patches
 import heapq
-import threading
 import random
 
 from safety_state import is_person_detected, is_stop_sign_detected
-# import object_detection
-import object_detection_5MP_cam as object_detection
 
 # Constants
 MAP_SIZE = 40
@@ -54,29 +51,14 @@ car_theta = math.pi / 2  # car starts facing the positive y direction (90 degree
 
 def main():
     """
-    Main function to start the self-driving behavior. 
-    Initializes the object detection thread and repeatedly plans 
-    and executes paths to the goal while updating the map with sensor data.
+    Main function to run the advanced mapping and navigation demo.
     """
     global grid_map
-    
-    print('Starting object detection camera thread...')
-    stop_event = threading.Event()
-    od_thread = threading.Thread(
-        target=object_detection.run,
-        args=('efficientdet_lite0.tflite', 0, 640, 480, 4, False, stop_event),
-        daemon=True
-    )
-    od_thread.start()
 
-    try:
-        grid_map[:] = 0
-        goal = (12, 18) # Target cell in the map (x, y)
-        navigate_to_goal(goal=goal, steps_per_plan=STEPS_PER_PLAN)
-    finally:
-        stop_event.set()
-        px.stop()
-        od_thread.join()
+    grid_map[:] = 0
+    # Goal grid coordinates (x, y) in cells
+    goal = (12, 18)
+    navigate_to_goal(goal=goal, steps_per_plan=STEPS_PER_PLAN)
 
 def mark_cell(x, y):
     """
