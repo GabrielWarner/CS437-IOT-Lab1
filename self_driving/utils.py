@@ -21,9 +21,9 @@ from safety_state import set_person_detected, set_stop_sign_detected
 PRINT_INTERVAL = 0.5
 last_person_time = 0
 last_stop_time = 0
-COOLDOWN = 2.0
+COOLDOWN = 2.0  # seconds
 
-LOG_LEVEL = "INFO"
+LOG_LEVEL = "INFO"  # DEBUG / INFO / WARNING
 
 def log(msg, level="INFO"):
     levels = ["DEBUG", "INFO", "WARNING"]
@@ -31,6 +31,7 @@ def log(msg, level="INFO"):
         print(f"[{level}] {msg}")
 
 def visualize(image: np.ndarray, detection_result: processor.DetectionResult) -> np.ndarray:
+    """Headless detection visualization: logs detections and updates flags"""
 
     global last_person_time, last_stop_time
     now = time.time()
@@ -41,7 +42,7 @@ def visualize(image: np.ndarray, detection_result: processor.DetectionResult) ->
         category = detection.categories[0]
         name = category.category_name.lower()
         score = category.score
-        if score < 0.5:
+        if score < 0.1:
             continue
         if name == "person":
             person_seen = True

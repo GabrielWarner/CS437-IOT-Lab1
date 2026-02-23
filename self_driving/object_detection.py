@@ -32,14 +32,15 @@ class VideoStream:
         self.stopped = False
 
     def start(self):
-        # Start the thread to read frames from the video stream
         threading.Thread(target=self.update, daemon=True).start()
         return self
 
     def update(self):
         while not self.stopped:
-            # Keep pulling the latest frame from the camera
-            self.grabbed, self.frame = self.cap.read()
+            grabbed, frame = self.cap.read()
+            if grabbed:
+                # Optimized: Convert in background so main loop doesn't wait
+                self.frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
 
     def read(self):
         return self.frame
@@ -66,7 +67,7 @@ def run(model, camera_id, width, height, num_threads, enable_edgetpu, stop_event
     time.sleep(1.0)
 
     base_options = core.BaseOptions(file_name=model, use_coral=enable_edgetpu, num_threads=num_threads)
-    detection_options = processor.DetectionOptions(max_results=3, score_threshold=0.3)
+    detection_options = processor.DetectionOptions(max_results=3, score_threshold=0.1)
     options = vision.ObjectDetectorOptions(base_options=base_options, detection_options=detection_options)
     detector = vision.ObjectDetector.create_from_options(options)
 
@@ -76,17 +77,19 @@ def run(model, camera_id, width, height, num_threads, enable_edgetpu, stop_event
     # thread is killed, preventing "Camera already in use" errors on restart.
     try:
         while not stop_event.is_set():
+            start_time = time.time()
             frame = vs.read()
             if frame is None:
                 continue
-            rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-            tensor = vision.TensorImage.create_from_array(rgb)
+            # rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+            # tensor = vision.TensorImage.create_from_array(rgb)
+            tensor = vision.TensorImage.create_from_array(frame)
             result = detector.detect(tensor)
             utils.visualize(frame, result)
             
             # Optimized: sleep allows the OS to switch between the camera thread 
             # and the inference thread efficiently, reducing CPU spikes.
-            time.sleep(0.01)
+            time.sleep(max(0, 0.1 - (time.time() - start_time)))
     finally:
         vs.stop()
         utils.log("Detector stopped", "INFO")
