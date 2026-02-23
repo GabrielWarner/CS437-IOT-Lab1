@@ -69,6 +69,14 @@ def main():
     )
     od_thread.start()
 
+    # --- Quick detection test: wait for camera warmup, then check ---
+    print('[TEST] Warming up camera for 5 seconds...')
+    time.sleep(5)
+    print(f'[TEST] Stop sign detected? {is_stop_sign_detected()}')
+    print(f'[TEST] Person detected?    {is_person_detected()}')
+    print('[TEST] Detection test done. Starting navigation in 3 seconds...')
+    time.sleep(3)
+
     try:
         grid_map[:] = 0
         goal = (12, 18) # Target cell in the map (x, y)
