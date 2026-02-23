@@ -2,6 +2,7 @@ import threading
 
 _person_detected = False
 _stop_sign_detected = False
+_stop_sign_pending = False   # latched flag: set on rising edge, cleared by driving code
 _arrived = False
 _running = True
 
@@ -26,6 +27,21 @@ def set_stop_sign_detected(value: bool):
 def is_stop_sign_detected() -> bool:
     with _lock:
         return _stop_sign_detected
+
+# -------- STOP SIGN PENDING (latched) --------
+def set_stop_sign_pending():
+    global _stop_sign_pending
+    with _lock:
+        _stop_sign_pending = True
+
+def is_stop_sign_pending() -> bool:
+    with _lock:
+        return _stop_sign_pending
+
+def clear_stop_sign_pending():
+    global _stop_sign_pending
+    with _lock:
+        _stop_sign_pending = False
 
 # -------- ARRIVAL --------
 def set_arrived(value: bool):

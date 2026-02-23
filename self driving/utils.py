@@ -16,12 +16,13 @@
 import time
 import numpy as np
 from tflite_support.task import processor
-from safety_state import set_person_detected, set_stop_sign_detected
+from safety_state import set_person_detected, set_stop_sign_detected, set_stop_sign_pending
 
 PRINT_INTERVAL = 0.5
 last_person_time = 0
 last_stop_time = 0
 COOLDOWN = 2.0
+_prev_stop_sign = False   # track previous frame to detect rising edge
 
 LOG_LEVEL = "INFO"
 
@@ -49,8 +50,14 @@ def visualize(image: np.ndarray, detection_result: processor.DetectionResult) ->
             stop_sign_seen = True
 
     # Update shared flags
+    global _prev_stop_sign
     set_person_detected(person_seen)
     set_stop_sign_detected(stop_sign_seen)
+
+    # Latch on rising edge: only set pending when stop sign FIRST appears
+    if stop_sign_seen and not _prev_stop_sign:
+        set_stop_sign_pending()
+    _prev_stop_sign = stop_sign_seen
 
     # Throttled logging
     if person_seen and now - last_person_time > COOLDOWN:

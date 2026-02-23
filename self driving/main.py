@@ -8,7 +8,7 @@ import heapq
 import threading
 import random
 
-from safety_state import is_person_detected, is_stop_sign_detected
+from safety_state import is_person_detected, is_stop_sign_detected, is_stop_sign_pending, clear_stop_sign_pending
 import object_detection
 
 # Constants
@@ -37,9 +37,6 @@ RIGHT_TURN_FWD_CM_PER_SEC = 16.0
 LEFT_TURN_FWD_CM_PER_SEC  = 13.0
 LEFT_TURN_RADIUS_CM  = 16.6
 RIGHT_TURN_RADIUS_CM = 27.0
-
-# --- ADDED GLOBAL FLAG ---
-_stop_sign_handled = False
 
 # Initialize the car and the map
 px = Picarx()
@@ -580,9 +577,16 @@ def reactive_avoidance():
 
 # Execute the first part of the path, then replan
 def follow_path(path, goal):
-    global car_theta, _stop_sign_handled # Added stop sign global
+    global car_theta
 
     seconds_per_cell = CM_PER_CELL / CM_PER_SEC
+
+    # Handle any latched stop-sign detection before we start driving
+    if is_stop_sign_pending():
+        px.stop()
+        print("[TRAFFIC] STOP SIGN was detected → stopping 3 sec")
+        time.sleep(3)
+        clear_stop_sign_pending()
 
     for i in range(1, len(path)):
         current = path[i - 1]
@@ -604,14 +608,12 @@ def follow_path(path, goal):
 
         rotate_to_heading(desired_theta)
 
-        # Traffic Signs and Pedestrian Detection
-        if is_stop_sign_detected() and not _stop_sign_handled:
+        # If a stop sign was detected since last check, handle it now
+        if is_stop_sign_pending():
             px.stop()
             print("[TRAFFIC] STOP SIGN detected → stopping 3 sec")
             time.sleep(3)
-            _stop_sign_handled = True
-        elif not is_stop_sign_detected():
-            _stop_sign_handled = False
+            clear_stop_sign_pending()
 
         while is_person_detected():
             px.stop()
