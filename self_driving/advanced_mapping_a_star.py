@@ -10,19 +10,19 @@ import random
 from safety_state import is_person_detected, is_stop_sign_detected
 
 # Constants
-MAP_SIZE = 40
+MAP_SIZE = 20
 MAX_DISTANCE = 100
 CM_PER_CELL = 5
 ANGLE_START = -60
 ANGLE_END = 60
 ANGLE_STEP = 5
-OBSTACLE_THRESHOLD = 60
+OBSTACLE_THRESHOLD = 100
 CM_PER_SEC = 20
 DRIVE_SPEED = 5
 TURN_DEG_PER_SEC = 35
 _robot_artists = []
 ROBOT_MARGIN = 15
-CLEARANCE_RADIUS = 1
+CLEARANCE_RADIUS = 0
 STEPS_PER_PLAN = 3
 
 # Turn tuning
@@ -69,15 +69,11 @@ def mark_cell(x, y):
     param y: Y coordinate in cm
     type y: int
     """
-    for dx in range(-CLEARANCE_RADIUS, CLEARANCE_RADIUS + 1):
-        for dy in range(-CLEARANCE_RADIUS, CLEARANCE_RADIUS + 1):
-            if dx*dx + dy*dy <= CLEARANCE_RADIUS*CLEARANCE_RADIUS:
-                nx = x + dx
-                ny = y + dy
-                if nx == car_x and ny == car_y:
-                    continue
-                if 0 <= nx < MAP_SIZE and 0 <= ny < MAP_SIZE:
-                    grid_map[ny, nx] = 1
+    global grid_map
+    r = CLEARANCE_RADIUS
+    y_min, y_max = max(0, y-r), min(MAP_SIZE, y+r+1)
+    x_min, x_max = max(0, x-r), min(MAP_SIZE, x+r+1)
+    grid_map[y_min:y_max, x_min:x_max] = 1
 
 def interpolate(point1, point2):
     """
@@ -669,10 +665,11 @@ def navigate_to_goal(goal, max_iters=50, steps_per_plan=STEPS_PER_PLAN):
 
     for _ in range(max_iters):
         # Update the environment
+        grid_map[:] = 0
         scan_environment()
 
-        grid_map *= 0.8                 # Slowly "forget" old obstacles so the map doesn't get stuck with noise forever
-        grid_map[grid_map < 0.2] = 0    # If it's faint, delete it entirely
+        # grid_map *= 0.8                 # Slowly "forget" old obstacles so the map doesn't get stuck with noise forever
+        # grid_map[grid_map < 0.2] = 0    # If it's faint, delete it entirely
 
         # Find path to goal using A*
         start = (car_x, car_y)
