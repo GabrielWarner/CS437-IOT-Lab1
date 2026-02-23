@@ -85,6 +85,10 @@ def run(model, camera_id, width, height, num_threads, enable_edgetpu, stop_event
 
     utils.log("Object detection started", "INFO")
 
+    last_stop_sign_print_time = 0.0
+    last_person_print_time = 0.0
+    print_cooldown_sec = 0.5
+
     # Optimized: Using try/finally maks sure that even if an error occurs, the camera 
     # thread is killed, preventing "Camera already in use" errors on restart.
     try:
@@ -96,7 +100,22 @@ def run(model, camera_id, width, height, num_threads, enable_edgetpu, stop_event
             tensor = vision.TensorImage.create_from_array(rgb)
             result = detector.detect(tensor)
             utils.visualize(frame, result)
-            
+
+            # Direct terminal output for detections (like detect.py)
+            now = time.time()
+            for detection in result.detections:
+                if not detection.categories:
+                    continue
+                category = detection.categories[0]
+                label = (category.category_name or '').strip().lower().replace('_', ' ').replace('-', ' ')
+                score = category.score
+                if label == 'stop sign' and now - last_stop_sign_print_time >= print_cooldown_sec:
+                    print(f'[CAMERA] stop sign detected (confidence={score:.4f})')
+                    last_stop_sign_print_time = now
+                if label == 'person' and now - last_person_print_time >= print_cooldown_sec:
+                    print(f'[CAMERA] person detected (confidence={score:.4f})')
+                    last_person_print_time = now
+
             # Optimized: sleep allows the OS to switch between the camera thread 
             # and the inference thread efficiently, reducing CPU spikes.
             time.sleep(0.01)

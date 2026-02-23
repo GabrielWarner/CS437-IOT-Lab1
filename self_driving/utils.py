@@ -41,7 +41,7 @@ def visualize(image: np.ndarray, detection_result: processor.DetectionResult) ->
         category = detection.categories[0]
         name = category.category_name.lower()
         score = category.score
-        if score < 0.5:
+        if score < 0.3:
             continue
         if name == "person":
             person_seen = True
