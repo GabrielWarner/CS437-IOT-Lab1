@@ -24,6 +24,9 @@ CM_PER_SEC = 20
 DRIVE_SPEED = 5
 TURN_DEG_PER_SEC = 35
 _robot_artists = []
+_path_artists = []
+_current_path = None
+_current_goal = None
 ROBOT_MARGIN = 15
 CLEARANCE_RADIUS = 1
 STEPS_PER_PLAN = 3
@@ -476,27 +479,57 @@ def draw_robot(ax, x, y, theta):
     
 plt.ion()  # Interactive mode
 
-_fig, _ax = plt.subplots()
-_img = _ax.imshow(grid_map, origin='lower', vmin=0, vmax=1)
-_ax.set_title('Obstacle Map (1=obstacle)')
+_fig, _ax = plt.subplots(figsize=(8, 8))
+_img = _ax.imshow(grid_map, origin='lower', vmin=0, vmax=1, cmap='Greys')
+_ax.set_title('Obstacle Map')
+
+# Legend
+_legend_handles = [
+    patches.Patch(facecolor='black', edgecolor='gray', label='Free space'),
+    patches.Patch(facecolor='white', edgecolor='gray', label='Obstacle'),
+    patches.Patch(facecolor='none', edgecolor='yellow', linewidth=2, label='Robot'),
+    plt.Line2D([0], [0], color='cyan', linewidth=2, label='Heading'),
+    plt.Line2D([0], [0], color='lime', linewidth=2, linestyle='--', label='Planned path'),
+    plt.Line2D([0], [0], marker='*', color='red', markersize=12, linestyle='None', label='Goal'),
+]
+_ax.legend(handles=_legend_handles, loc='upper right', fontsize=8, framealpha=0.8)
 
 plt.show()
 
 def show_map():
     """
-    Update the displayed map with the current grid_map data.
+    Update the displayed map with the current grid_map data,
+    including the planned A* path and goal marker.
     """
-    global _robot_artists
+    global _robot_artists, _path_artists
 
     _img.set_data(grid_map)
+    _img.set_cmap('Greys')
 
+    # Remove old robot and path drawings
     for a in _robot_artists:
         a.remove()
+    for a in _path_artists:
+        a.remove()
+    _path_artists = []
 
     _robot_artists = draw_robot(_ax, car_x, car_y, car_theta)
 
+    # Draw the planned A* path
+    if _current_path and len(_current_path) > 1:
+        xs = [p[0] for p in _current_path]
+        ys = [p[1] for p in _current_path]
+        line, = _ax.plot(xs, ys, color='lime', linewidth=2, linestyle='--', zorder=3)
+        _path_artists.append(line)
+
+    # Draw the goal marker
+    if _current_goal is not None:
+        goal_marker, = _ax.plot(_current_goal[0], _current_goal[1],
+                                marker='*', color='red', markersize=15, zorder=4)
+        _path_artists.append(goal_marker)
+
     _ax.set_xlim(0, MAP_SIZE)
-    _ax.set_ylim(-ROBOT_MARGIN, MAP_SIZE)  # Show robot outside map for better visualization
+    _ax.set_ylim(-ROBOT_MARGIN, MAP_SIZE)
 
     _fig.canvas.draw()
     _fig.canvas.flush_events()
@@ -696,7 +729,9 @@ def navigate_to_goal(goal, max_iters=50, steps_per_plan=STEPS_PER_PLAN):
     return: True if goal reached, False if failed
     rtype: bool
     """
-    global grid_map
+    global grid_map, _current_path, _current_goal
+
+    _current_goal = goal
 
     if at_goal(goal, tol_cells=1):
         print('[GOAL] Already at goal')
@@ -716,10 +751,15 @@ def navigate_to_goal(goal, max_iters=50, steps_per_plan=STEPS_PER_PLAN):
 
         if not path:
             print('[PATH] No path found')
+            show_map()
             return False
+
+        # Store path globally so show_map() can draw it
+        _current_path = path
 
         # Planned path
         print('[PATH] Planned path:', path[:10], '... len =', len(path))
+        show_map()  # Show updated map with new planned path
 
         if len(path) <= 1:
             print('[GOAL] Arrived')
