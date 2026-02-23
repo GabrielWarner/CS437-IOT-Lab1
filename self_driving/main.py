@@ -8,9 +8,9 @@ import heapq
 import threading
 import random
 
-from safety_state import is_person_detected, is_stop_sign_detected, was_stop_sign_ever_detected, was_person_ever_detected
+# from safety_state import is_person_detected, is_stop_sign_detected, was_stop_sign_ever_detected, was_person_ever_detected
 # import object_detection
-import object_detection_5MP_cam as object_detection
+# import object_detection_5MP_cam as object_detection
 
 # Constants
 MAP_SIZE = 40
@@ -60,14 +60,14 @@ def main():
     """
     global grid_map
     
-    print('Starting object detection camera thread...')
-    stop_event = threading.Event()
-    od_thread = threading.Thread(
-        target=object_detection.run,
-        args=('efficientdet_lite0.tflite', 0, 640, 480, 4, False, stop_event),
-        daemon=True
-    )
-    od_thread.start()
+    # print('Starting object detection camera thread...')
+    # stop_event = threading.Event()
+    # od_thread = threading.Thread(
+    #     target=object_detection.run,
+    #     args=('efficientdet_lite0.tflite', 0, 640, 480, 4, False, stop_event),
+    #     daemon=True
+    # )
+    # od_thread.start()
 
     # --- Quick detection test: show object in front of camera within 10 sec ---
     # print('[TEST] Camera warming up... hold a stop sign or stand in front within 10 seconds.')
@@ -92,9 +92,9 @@ def main():
         goal = (12, 18) # Target cell in the map (x, y)
         navigate_to_goal(goal=goal, steps_per_plan=STEPS_PER_PLAN)
     finally:
-        stop_event.set()
+        # stop_event.set()
         px.stop()
-        od_thread.join()
+        # od_thread.join()
 
 def mark_cell(x, y):
     """
@@ -640,19 +640,19 @@ def follow_path(path, goal):
 
         rotate_to_heading(desired_theta)
 
-        # Traffic Signs and Pedestrian Detection
-        if is_stop_sign_detected() and not _stop_sign_handled:
-            px.stop()
-            print('[TRAFFIC] STOP SIGN detected → stopping 3 sec')
-            time.sleep(3)
-            _stop_sign_handled = True
-        elif not is_stop_sign_detected():
-            _stop_sign_handled = False
+        # Traffic Signs and Pedestrian Detection (disabled for ultrasonic-only testing)
+        # if is_stop_sign_detected() and not _stop_sign_handled:
+        #     px.stop()
+        #     print('[TRAFFIC] STOP SIGN detected → stopping 3 sec')
+        #     time.sleep(3)
+        #     _stop_sign_handled = True
+        # elif not is_stop_sign_detected():
+        #     _stop_sign_handled = False
 
-        while is_person_detected():
-            px.stop()
-            print('[TRAFFIC] Person detected → waiting')
-            time.sleep(0.1)
+        # while is_person_detected():
+        #     px.stop()
+        #     print('[TRAFFIC] Person detected → waiting')
+        #     time.sleep(0.1)
             
         # Quick front ultrasonic scan to trigger avoidance before driving the cell
         distance = px.ultrasonic.read()
