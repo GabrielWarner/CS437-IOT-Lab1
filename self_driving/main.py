@@ -8,7 +8,7 @@ import heapq
 import threading
 import random
 
-from safety_state import is_person_detected, is_stop_sign_detected
+from safety_state import is_person_detected, is_stop_sign_detected, was_stop_sign_ever_detected, was_person_ever_detected
 # import object_detection
 import object_detection_5MP_cam as object_detection
 
@@ -69,11 +69,21 @@ def main():
     )
     od_thread.start()
 
-    # --- Quick detection test: wait for camera warmup, then check ---
-    print('[TEST] Warming up camera for 5 seconds...')
-    time.sleep(5)
-    print(f'[TEST] Stop sign detected? {is_stop_sign_detected()}')
-    print(f'[TEST] Person detected?    {is_person_detected()}')
+    # --- Quick detection test: show object in front of camera within 10 sec ---
+    print('[TEST] Camera warming up... hold a stop sign or stand in front within 10 seconds.')
+    test_duration = 10
+    test_start = time.time()
+    while time.time() - test_start < test_duration:
+        if was_stop_sign_ever_detected():
+            print('[TEST] *** STOP SIGN detected! ***')
+        if was_person_ever_detected():
+            print('[TEST] *** PERSON detected! ***')
+        if was_stop_sign_ever_detected() or was_person_ever_detected():
+            break
+        time.sleep(0.5)
+    print(f'[TEST] Results after {test_duration}s window:')
+    print(f'[TEST]   Stop sign ever detected? {was_stop_sign_ever_detected()}')
+    print(f'[TEST]   Person ever detected?    {was_person_ever_detected()}')
     print('[TEST] Detection test done. Starting navigation in 3 seconds...')
     time.sleep(3)
 
